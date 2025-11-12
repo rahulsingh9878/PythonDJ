@@ -18,7 +18,7 @@ yt = YTMusic()
 
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 out_tracks = []
-next_song_dt = {"title": None, "timestamp": 0}
+next_song_dt = {"title": None, "timestamp": 20}
 
 @app.get("/recommendations/")
 def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int = Query(10, ge=1, le=50)):
@@ -161,8 +161,7 @@ def get_track_lyrics_by_index(
         print(out_tracks)
         t = out_tracks[idx]
         title = t.get("title", "")
-        artists = t.get("artists", [])
-        artist_name = artists[0]["name"] if artists else None
+        artist_name = t.get("artist", "")
         video_id = t.get("videoId", "")
         music_url = f"https://music.youtube.com/watch?v={video_id}" if video_id else ""
 
@@ -190,5 +189,6 @@ def get_track_lyrics_by_index(
         for v in verses:
             print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
     next_song_dt["title"] = title
-    next_song_dt["timestamp"] = 20
+    if verses:
+        next_song_dt["timestamp"] = int(verses[0]['start_time'])
     return {"selected_track": selected, "lyrics_response": lyrics_response, "verse" : verses}
