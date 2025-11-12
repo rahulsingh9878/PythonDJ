@@ -36,7 +36,7 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
 
         recs = yt.get_watch_playlist(videoId=top_video_id)
         tracks = recs.get("tracks", [])[:limit]
-
+        print(tracks)
         out_tracks = []
         for idx, t in enumerate(tracks):
             title = t.get("title", "")
