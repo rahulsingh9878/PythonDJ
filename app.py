@@ -18,7 +18,7 @@ yt = YTMusic()
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 
 
-@app.get("/recommendations")
+@app.get("/recommendations/")
 def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int = Query(10, ge=1, le=50)):
     """
     Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
@@ -60,7 +60,7 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/lyrics")
+@app.get("/lyrics/")
 def get_lyrics(title: str = Query(..., example="MASAKALI"), artist: Optional[str] = Query(None, example="A. R. Rahman")):
     """
     Query RapidAPI endpoint that wraps Musixmatch-like search.
