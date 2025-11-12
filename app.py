@@ -5,8 +5,24 @@ import requests
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from utils import detect_verses
+
+app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
+origins = [
+    "https://rahulsingh9878.github.io",
+    "http://localhost", # (Optional) Also allow your local computer for testing
+    "http://127.0.0.1", # (Optional)
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------- Configuration ----------
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY")
@@ -16,7 +32,6 @@ RAPIDAPI_URL = f"https://{RAPIDAPI_HOST}/v1/social/spotify/musixmatchsearchlyric
 # Initialize YTMusic (anonymous). Keep a single instance.
 yt = YTMusic()
 
-app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 out_tracks = []
 next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 
