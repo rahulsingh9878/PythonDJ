@@ -4,3 +4,4 @@ fastapi
 pydantic
 gunicorn
 uvicorn
+jinja2
