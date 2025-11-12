@@ -39,7 +39,7 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
 
         recs = yt.get_watch_playlist(videoId=top_video_id)
         tracks = recs.get("tracks", [])[:limit]
-        print(tracks)
+        # print(tracks)
         for idx, t in enumerate(tracks):
             title = t.get("title", "")
             artists = t.get("artists", [])
@@ -148,7 +148,6 @@ def get_track_lyrics_by_index(
     Fetch recommendations for `query`, select track at index `idx` (0-based),
     then call the lyrics RapidAPI endpoint for that track and return combined result.
     """
-    print(out_tracks)
     if idx < 0:
         raise HTTPException(status_code=400, detail="idx must be >= 0")
 
@@ -158,7 +157,7 @@ def get_track_lyrics_by_index(
         if idx >= len(out_tracks):
             raise HTTPException(status_code=400, detail=f"idx {idx} out of range (0..{len(out_tracks)-1})")
 
-        print(out_tracks)
+        # print(out_tracks)
         t = out_tracks[idx]
         title = t.get("title", "")
         artist_name = t.get("artist", "")
@@ -193,14 +192,14 @@ def get_track_lyrics_by_index(
 
     if verses:
         next_song_dt["timestamp"] = int(verses[0]['start_time'])
-    return {"selected_track": selected, "lyrics_response": lyrics_response, "verse" : verses}
+    return {"selected_track": selected, "verse": verses}
 
-@app.get("/playthis/")
-def get_playthis():
+@app.get("/nextsong/")
+def get_nextsong():
     global next_song_dt
     
     if next_song_dt["videoId"] is None:
         raise HTTPException(status_code=400, detail="No id found")
     
-    return {"status": 200, next_song_dt}
+    return {"status": 200, "data": next_song_dt}
     
