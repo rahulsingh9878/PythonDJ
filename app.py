@@ -39,7 +39,7 @@ next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 templates = Jinja2Templates(directory="templates")
 
 @app.get("/recommendations/", response_class=HTMLResponse))
-def get_recommendations(request: Request,
+def get_recommendations_as_webview(request: Request,
                         query: str = Query(..., example="MASAKALI"), 
                         limit: int = Query(10, ge=1, le=50)):
     """
