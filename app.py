@@ -38,8 +38,10 @@ out_tracks = []
 next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 templates = Jinja2Templates(directory="templates")
 
-@app.get("/recommendations/")
-def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int = Query(10, ge=1, le=50)):
+@app.get("/recommendations/", response_class=HTMLResponse))
+def get_recommendations(request: Request,
+                        query: str = Query(..., example="MASAKALI"), 
+                        limit: int = Query(10, ge=1, le=50)):
     """
     Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
     Returns a plain JSON dict to avoid Pydantic forward-ref issues.
