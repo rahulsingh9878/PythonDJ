@@ -26,6 +26,7 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
     Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
     Returns a plain JSON dict to avoid Pydantic forward-ref issues.
     """
+    global out_tracks
     try:
         search_results = yt.search(query, filter="songs", limit=1)
         if not search_results:
@@ -39,7 +40,6 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
         recs = yt.get_watch_playlist(videoId=top_video_id)
         tracks = recs.get("tracks", [])[:limit]
         print(tracks)
-        out_tracks = []
         for idx, t in enumerate(tracks):
             title = t.get("title", "")
             artists = t.get("artists", [])
@@ -142,6 +142,8 @@ def fetch_lyrics(title: str, artist: str = None, delay: float = 0.5) -> dict:
 def get_track_lyrics_by_index(
     idx: int
 ):
+    global out_tracks
+    global next_song_dt
     """
     Fetch recommendations for `query`, select track at index `idx` (0-based),
     then call the lyrics RapidAPI endpoint for that track and return combined result.
