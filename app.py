@@ -184,9 +184,11 @@ def get_track_lyrics_by_index(
         return {"selected_track": selected, "lyrics_response": {"status": 500, "error": "Missing RAPIDAPI_KEY environment variable"}}
 
     lyrics_response = fetch_lyrics(title, artist_name)
-    verses = detect_verses(data, gap_threshold=8.0)
-    for v in verses:
-        print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
+    verses = []
+    if lyrics_response.get("data"):
+        verses = detect_verses(lyrics_response.get("data"), gap_threshold=8.0)
+        for v in verses:
+            print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
     next_song_dt["title"] = title
     next_song_dt["timestamp"] = 20
     return {"selected_track": selected, "lyrics_response": lyrics_response, "verse" : verses}
