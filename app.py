@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from ytmusicapi import YTMusic
-import detect_verses
+from utils import detect_verses
 
 # ---------- Configuration ----------
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY")
