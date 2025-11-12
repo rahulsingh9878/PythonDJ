@@ -1,9 +1,10 @@
-from typing import List, Optional
+# app.py
 import os
 import time
 import requests
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
 from ytmusicapi import YTMusic
 
 # ---------- Configuration ----------
@@ -11,31 +12,18 @@ RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY")
 RAPIDAPI_HOST = os.environ.get("RAPIDAPI_HOST", "spotify-web-api3.p.rapidapi.com")
 RAPIDAPI_URL = f"https://{RAPIDAPI_HOST}/v1/social/spotify/musixmatchsearchlyrics"
 
-# Initialize YTMusic (anonymous)
+# Initialize YTMusic (anonymous). Keep a single instance.
 yt = YTMusic()
 
-app = FastAPI(title="YTMusic -> Lyrics FastAPI", version="1.0")
-
-# ---------- Response models ----------
-class SongItem(BaseModel):
-    index: int
-    title: str
-    artist: str
-    videoId: str
-    music_url: str
-
-class RecommendationsResponse(BaseModel):
-    query: str
-    tracks: List[SongItem]
-
-class LyricsResponse(BaseModel):
-    status: int
-    data: dict
+app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 
 
-# ---------- Endpoints ----------
-@app.get("/recommendations", response_model=RecommendationsResponse)
+@app.get("/recommendations")
 def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int = Query(10, ge=1, le=50)):
+    """
+    Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
+    Returns a plain JSON dict to avoid Pydantic forward-ref issues.
+    """
     try:
         search_results = yt.search(query, filter="songs", limit=1)
         if not search_results:
@@ -56,9 +44,15 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
             artist_name = artists[0]["name"] if artists else "Unknown Artist"
             video_id = t.get("videoId", "")
             url = f"https://music.youtube.com/watch?v={video_id}" if video_id else ""
-            out_tracks.append(SongItem(index=idx, title=title, artist=artist_name, videoId=video_id, music_url=url))
+            out_tracks.append({
+                "index": idx,
+                "title": title,
+                "artist": artist_name,
+                "videoId": video_id,
+                "music_url": url
+            })
 
-        return RecommendationsResponse(query=query, tracks=out_tracks)
+        return {"query": query, "tracks": out_tracks}
 
     except requests.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {e}")
@@ -66,8 +60,12 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/lyrics", response_model=LyricsResponse)
+@app.get("/lyrics")
 def get_lyrics(title: str = Query(..., example="MASAKALI"), artist: Optional[str] = Query(None, example="A. R. Rahman")):
+    """
+    Query RapidAPI endpoint that wraps Musixmatch-like search.
+    Returns the raw payload (dict) from RapidAPI to avoid model parsing errors.
+    """
     if not RAPIDAPI_KEY:
         raise HTTPException(status_code=500, detail="Missing RAPIDAPI_KEY environment variable")
 
@@ -80,7 +78,7 @@ def get_lyrics(title: str = Query(..., example="MASAKALI"), artist: Optional[str
         "x-rapidapi-host": RAPIDAPI_HOST
     }
 
-    # Gentle wait to avoid hammering RapidAPI
+    # Short sleep to be gentle on upstream
     time.sleep(0.5)
 
     resp = requests.get(RAPIDAPI_URL, headers=headers, params=params, timeout=15)
@@ -90,7 +88,5 @@ def get_lyrics(title: str = Query(..., example="MASAKALI"), artist: Optional[str
         raise HTTPException(status_code=502, detail=f"RapidAPI HTTP error: {e} - {resp.text[:500]}")
 
     data = resp.json()
-    status = data.get("status", resp.status_code)
-    payload = data.get("data", data)
-
-    return LyricsResponse(status=status, data=payload)
+    # forward the status/data shape as-is
+    return {"status": data.get("status", resp.status_code), "data": data.get("data", data)}
