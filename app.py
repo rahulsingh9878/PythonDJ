@@ -4,10 +4,12 @@ import time
 import requests
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from utils import detect_verses
+from fastapi.templating import Jinja2Templates
+
 
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 origins = [
@@ -34,6 +36,7 @@ yt = YTMusic()
 
 out_tracks = []
 next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
+templates = Jinja2Templates(directory="templates")
 
 @app.get("/recommendations/")
 def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int = Query(10, ge=1, le=50)):
@@ -70,7 +73,13 @@ def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int 
                 "music_url": url
             })
 
-        return {"query": query, "tracks": out_tracks}
+        # return {"query": query, "tracks": out_tracks}
+        context = {
+            "request": request,
+            "query": query,
+            "tracks": out_tracks
+        }
+        return templates.TemplateResponse("recommendations.html", context)
 
     except requests.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {e}")
