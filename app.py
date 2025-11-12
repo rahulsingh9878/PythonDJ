@@ -195,8 +195,8 @@ def get_track_lyrics_by_index(
         next_song_dt["timestamp"] = int(verses[0]['start_time'])
     return {"selected_track": selected, "lyrics_response": lyrics_response, "verse" : verses}
 
-@app.get("/palythis/")
-def get_track_lyrics_by_index():
+@app.get("/playthis/")
+def get_playthis():
     global next_song_dt
     
     if next_song_dt["videoId"] is None:
