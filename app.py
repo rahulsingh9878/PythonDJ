@@ -5,6 +5,7 @@ import requests
 from typing import Optional
 
 from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from utils import detect_verses
