@@ -18,7 +18,7 @@ yt = YTMusic()
 
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 out_tracks = []
-next_song_dt = {"title": None, "timestamp": 20}
+next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 
 @app.get("/recommendations/")
 def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int = Query(10, ge=1, le=50)):
@@ -189,6 +189,18 @@ def get_track_lyrics_by_index(
         for v in verses:
             print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
     next_song_dt["title"] = title
+    next_song_dt["videoId"] = video_id
+
     if verses:
         next_song_dt["timestamp"] = int(verses[0]['start_time'])
     return {"selected_track": selected, "lyrics_response": lyrics_response, "verse" : verses}
+
+@app.get("/palythis/")
+def get_track_lyrics_by_index():
+    global next_song_dt
+    
+    if next_song_dt["videoId"] is None:
+        raise HTTPException(status_code=400, detail="No id found")
+    
+    return {"status": 200, next_song_dt}
+    
