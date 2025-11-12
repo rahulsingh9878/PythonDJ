@@ -138,7 +138,7 @@ def fetch_lyrics(title: str, artist: str = None, delay: float = 0.5) -> dict:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
-@app.get("/track/{idx}")
+@app.get("/track/{idx}/")
 def get_track_lyrics_by_index(
     idx: int
 ):
@@ -146,6 +146,7 @@ def get_track_lyrics_by_index(
     Fetch recommendations for `query`, select track at index `idx` (0-based),
     then call the lyrics RapidAPI endpoint for that track and return combined result.
     """
+    print(out_tracks)
     if idx < 0:
         raise HTTPException(status_code=400, detail="idx must be >= 0")
 
