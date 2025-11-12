@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from ytmusicapi import YTMusic
+import detect_verses
 
 # ---------- Configuration ----------
 RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY")
@@ -16,7 +17,8 @@ RAPIDAPI_URL = f"https://{RAPIDAPI_HOST}/v1/social/spotify/musixmatchsearchlyric
 yt = YTMusic()
 
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
-
+out_tracks = []
+next_song_dt = {"title": None, "timestamp": 0}
 
 @app.get("/recommendations/")
 def get_recommendations(query: str = Query(..., example="MASAKALI"), limit: int = Query(10, ge=1, le=50)):
@@ -90,3 +92,98 @@ def get_lyrics(title: str = Query(..., example="MASAKALI"), artist: Optional[str
     data = resp.json()
     # forward the status/data shape as-is
     return {"status": data.get("status", resp.status_code), "data": data.get("data", data)}
+
+
+def fetch_lyrics(title: str, artist: str = None, delay: float = 0.5) -> dict:
+    """
+    Fetch lyrics using the RapidAPI Musixmatch wrapper.
+
+    Args:
+        title (str): Song title to search for
+        artist (str, optional): Artist name (recommended for accuracy)
+        delay (float, optional): Sleep time before request to avoid rate-limit issues
+
+    Returns:
+        dict: {
+            "status": int,
+            "data": dict (raw RapidAPI response)
+        }
+
+    Raises:
+        HTTPException: If API key missing or HTTP errors occur
+    """
+
+    if not RAPIDAPI_KEY:
+        raise HTTPException(status_code=500, detail="Missing RAPIDAPI_KEY environment variable")
+
+    params = {"terms": title}
+    if artist:
+        params["artist"] = artist
+
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST
+    }
+
+    # Prevent hammering upstream API
+    time.sleep(delay)
+
+    try:
+        resp = requests.get(RAPIDAPI_URL, headers=headers, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        return {"status": data.get("status", resp.status_code), "data": data.get("data", data)}
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"RapidAPI HTTP error: {e} - {resp.text[:500]}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@app.get("/track/{idx}")
+def get_track_lyrics_by_index(
+    idx: int
+):
+    """
+    Fetch recommendations for `query`, select track at index `idx` (0-based),
+    then call the lyrics RapidAPI endpoint for that track and return combined result.
+    """
+    if idx < 0:
+        raise HTTPException(status_code=400, detail="idx must be >= 0")
+
+    # Step 1: get recommendations (reuse the logic above)
+    try:
+        # find top search result
+        if idx >= len(out_tracks):
+            raise HTTPException(status_code=400, detail=f"idx {idx} out of range (0..{len(out_tracks)-1})")
+
+        print(out_tracks)
+        t = out_tracks[idx]
+        title = t.get("title", "")
+        artists = t.get("artists", [])
+        artist_name = artists[0]["name"] if artists else None
+        video_id = t.get("videoId", "")
+        music_url = f"https://music.youtube.com/watch?v={video_id}" if video_id else ""
+
+        selected = {
+            "index": idx,
+            "title": title,
+            "artist": artist_name,
+            "videoId": video_id,
+            "music_url": music_url
+        }
+
+    except requests.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Step 2: call lyrics endpoint (if RAPIDAPI_KEY present)
+    if not RAPIDAPI_KEY:
+        return {"selected_track": selected, "lyrics_response": {"status": 500, "error": "Missing RAPIDAPI_KEY environment variable"}}
+
+    lyrics_response = fetch_lyrics(title, artist_name)
+    verses = detect_verses(data, gap_threshold=8.0)
+    for v in verses:
+        print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
+    next_song_dt["title"] = title
+    next_song_dt["timestamp"] = 20
+    return {"selected_track": selected, "lyrics_response": lyrics_response, "verse" : verses}
