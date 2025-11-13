@@ -15,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 origins = [
     "https://rahulsingh9878.github.io",
+    "https://www.codechef.com/html-online-compiler",
     "http://localhost", # (Optional) Also allow your local computer for testing
     "http://127.0.0.1", # (Optional)
 ]
