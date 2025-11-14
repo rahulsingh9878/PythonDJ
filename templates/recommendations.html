@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Results for {{ query }}</title>
+    <title>Music Player - {{ query }}</title>
     
     <style>
         * {
@@ -14,26 +14,46 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #7e22ce 100%);
             min-height: 100vh;
-            padding: 16px;
+            padding: 20px;
+            overflow-x: hidden;
         }
         
         .container {
             width: 100%;
-            max-width: 600px;
+            max-width: 450px;
             margin: 0 auto;
-            background-color: #ffffff;
-            border-radius: 16px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             overflow: hidden;
-            animation: slideUp 0.3s ease-out;
+            animation: slideUp 0.4s ease-out;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* Fullscreen Mode */
+        body.fullscreen {
+            padding: 0;
+        }
+        
+        body.fullscreen .container {
+            max-width: 100%;
+            height: 100vh;
+            border-radius: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        body.fullscreen .tracks-list {
+            max-height: none;
+            flex: 1;
         }
         
         @keyframes slideUp {
             from {
                 opacity: 0;
-                transform: translateY(20px);
+                transform: translateY(30px);
             }
             to {
                 opacity: 1;
@@ -41,162 +61,214 @@
             }
         }
         
+        /* Header with Player Info */
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 24px;
+            padding: 24px 20px;
+            position: relative;
+        }
+        
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .back-btn, .fullscreen-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.3s;
+        }
+        
+        .back-btn:hover, .fullscreen-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
         }
         
         .header h2 {
-            font-size: 1.4em;
+            font-size: 1.1em;
             font-weight: 600;
-            margin-bottom: 8px;
+            opacity: 0.9;
             word-break: break-word;
         }
         
+        /* Search Section */
         .search-section {
             padding: 20px;
-            background-color: #f8f9fa;
+            background: linear-gradient(to bottom, #f8f9fa, #ffffff);
             border-bottom: 1px solid #e5e5e5;
         }
         
         .search-box {
-            display: flex;
-            gap: 8px;
+            position: relative;
             margin-bottom: 16px;
-            flex-wrap: wrap;
         }
         
         .search-input {
-            flex: 1;
-            min-width: 200px;
-            padding: 12px 16px;
+            width: 100%;
+            padding: 14px 50px 14px 16px;
             border: 2px solid #e5e5e5;
-            border-radius: 12px;
-            font-size: 16px;
-            transition: all 0.2s;
-            background-color: white;
+            border-radius: 16px;
+            font-size: 15px;
+            transition: all 0.3s;
+            background: white;
         }
         
         .search-input:focus {
             outline: none;
             border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
         }
         
         .search-button {
-            padding: 12px 24px;
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            padding: 10px 16px;
             border: none;
             border-radius: 12px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-            white-space: nowrap;
+            transition: all 0.2s;
         }
         
         .search-button:hover {
-            transform: translateY(-2px);
+            transform: translateY(-50%) scale(1.05);
             box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
         }
         
-        .search-button:active {
-            transform: translateY(0);
-        }
-        
+        /* Slider Section */
         .slider-section {
             display: flex;
             align-items: center;
             gap: 12px;
-            flex-wrap: wrap;
         }
         
         .slider-label {
-            font-size: 14px;
+            font-size: 13px;
             color: #666;
-            font-weight: 500;
+            font-weight: 600;
+            white-space: nowrap;
         }
         
         .slider-value {
-            display: inline-block;
-            min-width: 28px;
-            padding: 4px 8px;
-            background-color: #667eea;
+            min-width: 32px;
+            padding: 4px 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            border-radius: 6px;
-            font-weight: 600;
+            border-radius: 8px;
+            font-weight: 700;
             text-align: center;
-            font-size: 14px;
+            font-size: 13px;
         }
         
         .slider {
             flex: 1;
-            min-width: 150px;
             height: 6px;
             border-radius: 3px;
-            background: #e5e5e5;
+            background: linear-gradient(to right, #667eea, #764ba2);
             outline: none;
             -webkit-appearance: none;
+            opacity: 0.3;
+            transition: opacity 0.2s;
+        }
+        
+        .slider:hover {
+            opacity: 0.5;
         }
         
         .slider::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
-            width: 20px;
-            height: 20px;
+            width: 22px;
+            height: 22px;
             border-radius: 50%;
-            background: #667eea;
+            background: white;
             cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+            border: 3px solid #667eea;
             transition: all 0.2s;
         }
         
         .slider::-webkit-slider-thumb:hover {
             transform: scale(1.2);
-            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
         }
         
         .slider::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
+            width: 22px;
+            height: 22px;
             border-radius: 50%;
-            background: #667eea;
+            background: white;
             cursor: pointer;
-            border: none;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            border: 3px solid #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
             transition: all 0.2s;
         }
         
         .slider::-moz-range-thumb:hover {
             transform: scale(1.2);
-            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
         }
         
+        /* Tracks List */
         .tracks-list {
             list-style-type: none;
-            max-height: 60vh;
+            max-height: 50vh;
             overflow-y: auto;
+            padding-bottom: 100px;
         }
         
         .tracks-list::-webkit-scrollbar {
-            width: 8px;
+            width: 6px;
         }
         
         .tracks-list::-webkit-scrollbar-track {
-            background: #f1f1f1;
+            background: transparent;
         }
         
         .tracks-list::-webkit-scrollbar-thumb {
-            background: #667eea;
-            border-radius: 4px;
+            background: linear-gradient(to bottom, #667eea, #764ba2);
+            border-radius: 3px;
         }
         
         .track-item {
-            border-bottom: 1px solid #e5e5e5;
-            transition: background-color 0.2s;
+            border-bottom: 1px solid #f0f0f0;
+            transition: all 0.3s;
             cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .track-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(to bottom, #667eea, #764ba2);
+            transform: scaleY(0);
+            transition: transform 0.3s;
+        }
+        
+        .track-item:hover::before {
+            transform: scaleY(1);
         }
         
         .track-item:last-child {
@@ -204,38 +276,68 @@
         }
         
         .track-item:hover {
-            background-color: #f8f9fa;
+            background: linear-gradient(to right, rgba(102, 126, 234, 0.05), transparent);
         }
         
         .track-item:active {
-            background-color: #e9ecef;
+            transform: scale(0.98);
         }
         
         .track-link {
             display: flex;
             align-items: center;
-            padding: 16px 20px;
+            padding: 14px 20px;
             text-decoration: none;
             color: inherit;
-            gap: 16px;
+            gap: 14px;
         }
         
         .track-index {
-            color: #888;
-            font-size: 1em;
-            font-weight: 600;
-            min-width: 32px;
-            text-align: right;
+            color: #999;
+            font-size: 0.95em;
+            font-weight: 700;
+            min-width: 28px;
+            text-align: center;
+        }
+        
+        .track-thumbnail-wrapper {
+            position: relative;
+            width: 56px;
+            height: 56px;
+            min-width: 56px;
         }
         
         .track-thumbnail {
-            width: 60px;
-            height: 60px;
-            min-width: 60px;
-            border-radius: 8px;
+            width: 100%;
+            height: 100%;
+            border-radius: 10px;
             object-fit: cover;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .play-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(102, 126, 234, 0.9);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .track-item:hover .play-overlay {
+            opacity: 1;
+        }
+        
+        .play-icon {
+            color: white;
+            font-size: 20px;
         }
         
         .track-info {
@@ -244,7 +346,7 @@
         }
         
         .track-title {
-            font-size: 1em;
+            font-size: 0.95em;
             font-weight: 600;
             color: #1c1c1e;
             margin-bottom: 4px;
@@ -254,31 +356,152 @@
         }
         
         .track-artist {
-            font-size: 0.9em;
-            color: #666;
+            font-size: 0.85em;
+            color: #888;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
         
         .track-chevron {
-            color: #ccc;
-            font-size: 1.2em;
+            color: #ddd;
+            font-size: 1.4em;
+            transition: all 0.3s;
+        }
+        
+        .track-item:hover .track-chevron {
+            color: #667eea;
+            transform: translateX(4px);
+        }
+        
+        /* Volume Control Player at Bottom */
+        .volume-player {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            backdrop-filter: blur(20px);
+        }
+        
+        .volume-content {
+            max-width: 450px;
+            margin: 0 auto;
+        }
+        
+        .volume-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        
+        .volume-label {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .volume-value {
+            font-size: 1.1em;
+            font-weight: 700;
+            color: white;
+            min-width: 45px;
+            text-align: right;
+        }
+        
+        .volume-slider-wrapper {
+            position: relative;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .volume-progress {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            background: white;
+            border-radius: 4px;
+            transition: width 0.1s;
+            pointer-events: none;
+        }
+        
+        .volume-slider {
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 100%;
+            height: 8px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            outline: none;
+            cursor: pointer;
+            z-index: 2;
+        }
+        
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s;
+        }
+        
+        .volume-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+        }
+        
+        .volume-slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s;
+        }
+        
+        .volume-slider::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
         }
         
         .empty-state {
-            padding: 60px 20px;
+            padding: 80px 20px;
             text-align: center;
-            color: #666;
+            color: #999;
         }
         
         .empty-state-icon {
-            font-size: 3em;
+            font-size: 4em;
             margin-bottom: 16px;
             opacity: 0.3;
         }
         
-                    @media (max-width: 480px) {
+        .empty-state-text {
+            font-size: 1.1em;
+            font-weight: 500;
+        }
+        
+        /* Mobile Responsive */
+        @media (max-width: 480px) {
             body {
                 padding: 0;
             }
@@ -288,77 +511,109 @@
                 min-height: 100vh;
             }
             
+            .header {
+                padding: 20px 16px;
+            }
+            
             .header h2 {
-                font-size: 1.2em;
+                font-size: 1em;
             }
             
             .search-section {
                 padding: 16px;
             }
             
-            .search-box {
-                flex-direction: column;
-            }
-            
             .search-input {
-                min-width: 100%;
+                font-size: 14px;
+                padding: 12px 50px 12px 14px;
             }
             
             .search-button {
-                width: 100%;
+                padding: 8px 14px;
+                font-size: 13px;
             }
             
-            .slider-section {
-                flex-direction: column;
-                align-items: flex-start;
+            .slider-label {
+                font-size: 12px;
             }
             
-            .slider {
-                width: 100%;
+            .slider-value {
+                font-size: 12px;
+                padding: 3px 8px;
             }
             
             .track-link {
-                padding: 14px 16px;
+                padding: 12px 16px;
                 gap: 12px;
             }
             
             .track-index {
-                min-width: 24px;
                 font-size: 0.9em;
+                min-width: 24px;
             }
             
-            .track-thumbnail {
+            .track-thumbnail-wrapper {
                 width: 50px;
                 height: 50px;
                 min-width: 50px;
             }
             
             .track-title {
-                font-size: 0.95em;
+                font-size: 0.9em;
             }
             
             .track-artist {
+                font-size: 0.8em;
+            }
+            
+            .volume-player {
+                padding: 16px;
+            }
+            
+            .volume-label {
                 font-size: 0.85em;
             }
-            .volume-control-bottom {
-                margin-top: 2rem;
-                padding: 1.5rem;
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 12px;
-                border: 1px solid rgba(255, 255, 255, 0.1);
+            
+            .volume-value {
+                font-size: 1em;
+            }
         }
+        
+        /* Landscape Mobile */
+        @media (max-height: 500px) and (orientation: landscape) {
+            .tracks-list {
+                max-height: 35vh;
+            }
+            
+            .header {
+                padding: 12px 16px;
+            }
+            
+            .search-section {
+                padding: 12px 16px;
+            }
+            
+            .volume-player {
+                padding: 12px 16px;
+            }
         }
     </style>
 </head>
 <body>
-<div class="container">
+    <div class="container">
         <div class="header">
-            <h2>🎵 Results for: "{{ query }}"</h2>
+            <div class="header-top">
+                <button class="back-btn" onclick="history.back()">←</button>
+                <button class="fullscreen-btn" onclick="toggleFullscreen()">⛶</button>
+            </div>
+            <h2>🎵 {{ query }}</h2>
         </div>
         
         <div class="search-section">
             <form id="trackForm" action="/recommendations/" method="GET">
                 <input type="radio" hidden id="nextPlay" name="nextPlay">
+                <input type="range" hidden id="maxVol" name="maxVol" min="0" max="100" value={{maxVol}}>
+                
                 <div class="search-box">
                     <input 
                         type="text" 
@@ -369,13 +624,13 @@
                         value="{{ query }}"
                     >
                     <button type="submit" class="search-button">
-                        Search
+                        🔍
                     </button>
                 </div>
                 
                 <div class="slider-section">
-                    <span class="slider-label">Results:</span>
-                    <span class="slider-value" id="limitValue">20</span>
+                    <span class="slider-label">Results</span>
+                    <span class="slider-value" id="limitValue">{{recLimit}}</span>
                     <input 
                         type="range" 
                         class="slider"
@@ -383,7 +638,7 @@
                         name="limit" 
                         min="1" 
                         max="50" 
-                        value="20"
+                        value={{recLimit}}
                     >
                 </div>
             </form>
@@ -394,7 +649,12 @@
             <li class="track-item" data-title="{{ t.title }}">
                 <a href="javascript:void(0)" class="track-link">
                     <span class="track-index">{{ loop.index }}</span>
-                    <img src="{{ t.thumbnail }}" alt="{{ t.title }}" class="track-thumbnail" loading="lazy">
+                    <div class="track-thumbnail-wrapper">
+                        <img src="{{ t.thumbnail }}" alt="{{ t.title }}" class="track-thumbnail" loading="lazy">
+                        <div class="play-overlay">
+                            <span class="play-icon">▶</span>
+                        </div>
+                    </div>
                     <div class="track-info">
                         <div class="track-title">{{ t.title }}</div>
                         <div class="track-artist">{{ t.artist }}</div>
@@ -404,26 +664,44 @@
             </li>
             {% endfor %}
         </ul>
+    </div>
 
-        <!-- Volume Control at Bottom -->
-        <div class="volume-control-bottom">
-            <div class="slider-section">
-                <span class="slider-label">🔊 Volume:</span>
-                <span class="slider-value" id="volumeValue">50</span>
+    <!-- Volume Player Control -->
+    <div class="volume-player">
+        <div class="volume-content">
+            <div class="volume-header">
+                <span class="volume-label">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                    </svg>
+                    Volume
+                </span>
+                <span class="volume-value" id="volumeValue">{{maxVol}}%</span>
+            </div>
+            <div class="volume-slider-wrapper">
+                <div class="volume-progress" id="volumeProgress"></div>
                 <input 
                     type="range" 
-                    class="slider"
+                    class="volume-slider"
                     id="volumeSlider" 
-                    min="1" 
+                    min="0" 
                     max="100" 
-                    value="100"
+                    value={{maxVol}}
                 >
             </div>
         </div>
     </div>
 
     <script>
-       
+        // Fullscreen toggle
+        function toggleFullscreen() {
+            document.body.classList.toggle('fullscreen');
+            const btn = document.querySelector('.fullscreen-btn');
+            btn.textContent = document.body.classList.contains('fullscreen') ? '⛶' : '⛶';
+        }
+
         // Volume control WebSocket connection
         let volumeWs = null;
 
@@ -453,10 +731,16 @@
         // Volume slider control
         const volumeSlider = document.getElementById('volumeSlider');
         const volumeValue = document.getElementById('volumeValue');
+        const volumeProgress = document.getElementById('volumeProgress');
+        
+        function updateVolume(value) {
+            volumeValue.textContent = value + '%';
+            volumeProgress.style.width = value + '%';
+        }
         
         volumeSlider.addEventListener('input', function() {
             const volume = this.value;
-            volumeValue.textContent = volume;
+            updateVolume(volume);
             
             // Send volume to WebSocket
             if (volumeWs && volumeWs.readyState === WebSocket.OPEN) {
@@ -466,14 +750,16 @@
                 console.warn('Volume WebSocket not connected');
             }
         });
+        
+        // Initialize volume display
+        updateVolume(volumeSlider.value);
  
-        // Slider handling
-        const slider = document.getElementById('limitSlider');
+        // Limit slider handling
+        const limitSlider = document.getElementById('limitSlider');
         const limitValue = document.getElementById('limitValue');
         
-        slider.addEventListener('input', (e) => {
-            const value = e.target.value;
-            limitValue.textContent = value;
+        limitSlider.addEventListener('input', (e) => {
+            limitValue.textContent = e.target.value;
         });
         
         // Track click handling
@@ -482,8 +768,17 @@
                 const title = item.dataset.title;
                 document.getElementById('queryInput').value = title;
                 document.getElementById("nextPlay").checked = true;
+                document.getElementById("maxVol").value = document.getElementById("volumeSlider").value;
                 document.getElementById('trackForm').submit();
             });
+        });
+        
+        // Prevent form submission on Enter in search input
+        document.getElementById('queryInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('trackForm').submit();
+            }
         });
     </script>
 </body>

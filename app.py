@@ -144,8 +144,9 @@ async def websocket_vol_endpoint(websocket: WebSocket):
 @app.get("/recommendations/", response_class=HTMLResponse)
 async def get_recommendations_as_webview(request: Request,
                         query: str = Query(..., example="MASAKALI"), 
-                        limit: int = Query(10, ge=1, le=50),
-                        nextPlay: bool = False):
+                        limit: int = Query(20, ge=1, le=50),
+                        nextPlay: bool = False,
+                        maxVol: int = Query(100, ge=1, le=100)):
     """
     Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
     Returns a plain JSON dict to avoid Pydantic forward-ref issues.
@@ -192,7 +193,9 @@ async def get_recommendations_as_webview(request: Request,
         context = {
             "request": request,
             "query": query,
-            "tracks": out_tracks
+            "tracks": out_tracks,
+            "recLimit": limit,
+            "maxVol": maxVol,
         }
 
         return templates.TemplateResponse("recommendations.html", context)
