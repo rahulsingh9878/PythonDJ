@@ -3,74 +3,488 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- The title and query will be inserted by Jinja -->
     <title>Results for {{ query }}</title>
     
-    <!-- This is the same CSS from your Python file -->
     <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            margin: 0; padding: 20px;
-            background-color: #f0f2f5;
-            display: flex; justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 16px;
         }
+        
         .container {
-            width: 100%; max-width: 600px;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
             background-color: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
             overflow: hidden;
+            animation: slideUp 0.3s ease-out;
         }
-        h2 {
-            font-size: 1.5em; font-weight: 600;
-            padding: 20px 24px; margin: 0;
+        
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+        }
+        
+        .header h2 {
+            font-size: 1.4em;
+            font-weight: 600;
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+        
+        .search-section {
+            padding: 20px;
+            background-color: #f8f9fa;
             border-bottom: 1px solid #e5e5e5;
         }
-        ul { list-style-type: none; padding: 0; margin: 0; }
-        li { border-bottom: 1px solid #e5e5e5; }
-        li:last-child { border-bottom: none; }
-        li a {
-            display: block; padding: 16px 24px;
-            text-decoration: none; color: #000;
+        
+        .search-box {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        
+        .search-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 12px 16px;
+            border: 2px solid #e5e5e5;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.2s;
+            background-color: white;
+        }
+        
+        .search-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .search-button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            white-space: nowrap;
+        }
+        
+        .search-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        .search-button:active {
+            transform: translateY(0);
+        }
+        
+        .slider-section {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .slider-label {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+        }
+        
+        .slider-value {
+            display: inline-block;
+            min-width: 28px;
+            padding: 4px 8px;
+            background-color: #667eea;
+            color: white;
+            border-radius: 6px;
+            font-weight: 600;
+            text-align: center;
+            font-size: 14px;
+        }
+        
+        .slider {
+            flex: 1;
+            min-width: 150px;
+            height: 6px;
+            border-radius: 3px;
+            background: #e5e5e5;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: all 0.2s;
+        }
+        
+        .slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.4);
+        }
+        
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: all 0.2s;
+        }
+        
+        .slider::-moz-range-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.4);
+        }
+        
+        .tracks-list {
+            list-style-type: none;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        
+        .tracks-list::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .tracks-list::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .tracks-list::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+        
+        .track-item {
+            border-bottom: 1px solid #e5e5e5;
             transition: background-color 0.2s;
+            cursor: pointer;
         }
-        li a:hover { background-color: #f9f9f9; }
+        
+        .track-item:last-child {
+            border-bottom: none;
+        }
+        
+        .track-item:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .track-item:active {
+            background-color: #e9ecef;
+        }
+        
+        .track-link {
+            display: flex;
+            align-items: center;
+            padding: 16px 20px;
+            text-decoration: none;
+            color: inherit;
+            gap: 16px;
+        }
+        
         .track-index {
-            color: #888; font-size: 1em; font-weight: 500;
-            margin-right: 16px; min-width: 20px;
+            color: #888;
+            font-size: 1em;
+            font-weight: 600;
+            min-width: 32px;
+            text-align: right;
         }
-        .track-info { display: inline-block; vertical-align: middle; }
+        
+        .track-thumbnail {
+            width: 60px;
+            height: 60px;
+            min-width: 60px;
+            border-radius: 8px;
+            object-fit: cover;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .track-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
         .track-title {
-            font-size: 1.1em; font-weight: 600; color: #1c1c1e;
+            font-size: 1em;
+            font-weight: 600;
+            color: #1c1c1e;
+            margin-bottom: 4px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
+        
         .track-artist {
-            font-size: 0.9em; color: #666; margin-top: 4px;
+            font-size: 0.9em;
+            color: #666;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .track-chevron {
+            color: #ccc;
+            font-size: 1.2em;
+        }
+        
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: #666;
+        }
+        
+        .empty-state-icon {
+            font-size: 3em;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+        
+                    @media (max-width: 480px) {
+            body {
+                padding: 0;
+            }
+            
+            .container {
+                border-radius: 0;
+                min-height: 100vh;
+            }
+            
+            .header h2 {
+                font-size: 1.2em;
+            }
+            
+            .search-section {
+                padding: 16px;
+            }
+            
+            .search-box {
+                flex-direction: column;
+            }
+            
+            .search-input {
+                min-width: 100%;
+            }
+            
+            .search-button {
+                width: 100%;
+            }
+            
+            .slider-section {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .slider {
+                width: 100%;
+            }
+            
+            .track-link {
+                padding: 14px 16px;
+                gap: 12px;
+            }
+            
+            .track-index {
+                min-width: 24px;
+                font-size: 0.9em;
+            }
+            
+            .track-thumbnail {
+                width: 50px;
+                height: 50px;
+                min-width: 50px;
+            }
+            
+            .track-title {
+                font-size: 0.95em;
+            }
+            
+            .track-artist {
+                font-size: 0.85em;
+            }
+            .volume-control-bottom {
+                margin-top: 2rem;
+                padding: 1.5rem;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+        }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- The query is dynamically inserted here -->
-        <h2>Results for: "{{ query }}"</h2>
+<div class="container">
+        <div class="header">
+            <h2>🎵 Results for: "{{ query }}"</h2>
+        </div>
         
-        <ul>
-            <!--
-              This is a Jinja2 'for' loop.
-              It will loop over the 'tracks' list we passed from Python.
-            -->
+        <div class="search-section">
+            <form id="trackForm" action="/recommendations/" method="GET">
+                <input type="radio" hidden id="nextPlay" name="nextPlay">
+                <div class="search-box">
+                    <input 
+                        type="text" 
+                        name="query" 
+                        id="queryInput"
+                        class="search-input"
+                        placeholder="Search for music..." 
+                        value="{{ query }}"
+                    >
+                    <button type="submit" class="search-button">
+                        Search
+                    </button>
+                </div>
+                
+                <div class="slider-section">
+                    <span class="slider-label">Results:</span>
+                    <span class="slider-value" id="limitValue">20</span>
+                    <input 
+                        type="range" 
+                        class="slider"
+                        id="limitSlider" 
+                        name="limit" 
+                        min="1" 
+                        max="50" 
+                        value="20"
+                    >
+                </div>
+            </form>
+        </div>
+        
+        <ul class="tracks-list" id="tracksList">
             {% for t in tracks %}
-            <li>
-                <!-- We use dot-notation to access the track's data -->
-                <a href="{{ t.music_url }}" target="_blank">
-                    <span class="track-index">{{ t.index + 1 }}.</span>
+            <li class="track-item" data-title="{{ t.title }}">
+                <a href="javascript:void(0)" class="track-link">
+                    <span class="track-index">{{ loop.index }}</span>
+                    <img src="{{ t.thumbnail }}" alt="{{ t.title }}" class="track-thumbnail" loading="lazy">
                     <div class="track-info">
                         <div class="track-title">{{ t.title }}</div>
                         <div class="track-artist">{{ t.artist }}</div>
                     </div>
+                    <span class="track-chevron">›</span>
                 </a>
             </li>
             {% endfor %}
         </ul>
+
+        <!-- Volume Control at Bottom -->
+        <div class="volume-control-bottom">
+            <div class="slider-section">
+                <span class="slider-label">🔊 Volume:</span>
+                <span class="slider-value" id="volumeValue">50</span>
+                <input 
+                    type="range" 
+                    class="slider"
+                    id="volumeSlider" 
+                    min="1" 
+                    max="100" 
+                    value="100"
+                >
+            </div>
+        </div>
     </div>
+
+    <script>
+       
+        // Volume control WebSocket connection
+        let volumeWs = null;
+
+        function connectVolumeWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/vol/`;
+            
+            volumeWs = new WebSocket(wsUrl);
+            
+            volumeWs.onopen = function() {
+                console.log('Volume WebSocket connected');
+            };
+            
+            volumeWs.onerror = function(error) {
+                console.error('Volume WebSocket error:', error);
+            };
+            
+            volumeWs.onclose = function() {
+                console.log('Volume WebSocket closed. Reconnecting...');
+                setTimeout(connectVolumeWebSocket, 3000);
+            };
+        }
+
+        // Initialize volume WebSocket
+        connectVolumeWebSocket();
+
+        // Volume slider control
+        const volumeSlider = document.getElementById('volumeSlider');
+        const volumeValue = document.getElementById('volumeValue');
+        
+        volumeSlider.addEventListener('input', function() {
+            const volume = this.value;
+            volumeValue.textContent = volume;
+            
+            // Send volume to WebSocket
+            if (volumeWs && volumeWs.readyState === WebSocket.OPEN) {
+                volumeWs.send(volume);
+                console.log('Sent volume:', volume);
+            } else {
+                console.warn('Volume WebSocket not connected');
+            }
+        });
+ 
+        // Slider handling
+        const slider = document.getElementById('limitSlider');
+        const limitValue = document.getElementById('limitValue');
+        
+        slider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            limitValue.textContent = value;
+        });
+        
+        // Track click handling
+        document.querySelectorAll('.track-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const title = item.dataset.title;
+                document.getElementById('queryInput').value = title;
+                document.getElementById("nextPlay").checked = true;
+                document.getElementById('trackForm').submit();
+            });
+        });
+    </script>
 </body>
 </html>

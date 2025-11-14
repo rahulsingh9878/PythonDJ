@@ -2,13 +2,13 @@
 import os
 import time
 import requests
-from typing import Optional
+from typing import Optional, List
 
-from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
-from utils import detect_verses
+from utils import detect_verses, find_video_id
 from fastapi.templating import Jinja2Templates
 
 
@@ -18,6 +18,8 @@ origins = [
     "https://www.codechef.com/html-online-compiler",
     "http://localhost", # (Optional) Also allow your local computer for testing
     "http://127.0.0.1", # (Optional)
+    "http://0.0.0.0:5500",
+    "http://localhost:5500"
 ]
 
 app.add_middleware(
@@ -40,16 +42,121 @@ out_tracks = []
 next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 templates = Jinja2Templates(directory="templates")
 
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self.vol_control_connections: List[WebSocket] = []  # Separate list for volume control
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    async def connect_vol_control(self, websocket: WebSocket):
+        await websocket.accept()
+        self.vol_control_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    def disconnect_vol_control(self, websocket: WebSocket):
+        if websocket in self.vol_control_connections:
+            self.vol_control_connections.remove(websocket)
+
+    async def broadcast_json(self, message: dict):
+        # iterate copy to avoid mutation issues
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                # If send fails, remove connection
+                try:
+                    await connection.close()
+                except Exception:
+                    pass
+                self.disconnect(connection)
+
+    async def broadcast_vol_control(self, message: dict):
+        # Broadcast to volume control connections
+        for connection in list(self.vol_control_connections):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                # If send fails, remove connection
+                try:
+                    await connection.close()
+                except Exception:
+                    pass
+                self.disconnect_vol_control(connection)
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket clients should connect here (ws://host:port/ws/).
+    They will receive JSON messages like {"video_id": "abc123"} when /play/ is POSTed.
+    """
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive. We don't expect messages from clients,
+            # but we can receive pings or optional messages.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+@app.websocket("/ws/vol/")
+async def websocket_vol_endpoint(websocket: WebSocket):
+    """
+    WebSocket clients send volume data here (ws://host:port/ws/vol/).
+    Received messages are broadcasted to /ws/ctrlvol/ connections.
+    """
+    await manager.connect_vol_control(websocket)
+    try:
+        while True:
+            # Receive volume data from client
+            vol = await websocket.receive_text()
+            # Broadcast the volume data to all /ws/ctrlvol/ connections
+            try:
+                vol_data = {"volume": vol}
+                await manager.broadcast_vol_control(vol_data)
+            except Exception as e:
+                print(f"Error broadcasting volume: {e}")
+            
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"Error in /ws/vol/: {e}")
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @app.get("/recommendations/", response_class=HTMLResponse)
-def get_recommendations_as_webview(request: Request,
+async def get_recommendations_as_webview(request: Request,
                         query: str = Query(..., example="MASAKALI"), 
-                        limit: int = Query(10, ge=1, le=50)):
+                        limit: int = Query(10, ge=1, le=50),
+                        nextPlay: bool = False):
     """
     Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
     Returns a plain JSON dict to avoid Pydantic forward-ref issues.
     """
     global out_tracks
     try:
+        if nextPlay and out_tracks:
+            nextID = find_video_id(out_tracks, query)
+            next_song_dt["videoId"] = nextID if nextID else next_song_dt["videoId"]
+            next_song_dt["title"] = query
+            await manager.broadcast_json(next_song_dt)
         search_results = yt.search(query, filter="songs", limit=1)
         if not search_results:
             raise HTTPException(status_code=404, detail="No search results found on YouTube Music")
@@ -66,6 +173,7 @@ def get_recommendations_as_webview(request: Request,
         for idx, t in enumerate(tracks):
             title = t.get("title", "")
             artists = t.get("artists", [])
+            thumbnail = t.get("thumbnail", [])[0]["url"]
             artist_name = artists[0]["name"] if artists else "Unknown Artist"
             video_id = t.get("videoId", "")
             url = f"https://music.youtube.com/watch?v={video_id}" if video_id else ""
@@ -74,15 +182,19 @@ def get_recommendations_as_webview(request: Request,
                 "title": title,
                 "artist": artist_name,
                 "videoId": video_id,
-                "music_url": url
+                "music_url": url, 
+                "thumbnail": thumbnail,
             })
 
         # return {"query": query, "tracks": out_tracks}
+        # if nextPlay:
+        #     next_song_dt["videoId"] = out_tracks[0]['videoId']
         context = {
             "request": request,
             "query": query,
             "tracks": out_tracks
         }
+
         return templates.TemplateResponse("recommendations.html", context)
 
     except requests.HTTPError as e:
@@ -222,13 +334,3 @@ def get_track_lyrics_by_index(
     if verses:
         next_song_dt["timestamp"] = int(verses[0]['start_time'])
     return {"selected_track": selected, "verse": verses}
-
-@app.get("/nextsong/")
-def get_nextsong():
-    global next_song_dt
-    
-    if next_song_dt["videoId"] is None:
-        raise HTTPException(status_code=400, detail="No id found")
-    
-    return {"status": 200, "data": next_song_dt}
-    

@@ -43,6 +43,15 @@ def detect_verses(data, gap_threshold=8.0):
 
     return verses
 
+def find_video_id(out_tracks, target_title):
+    """
+    Finds the videoId for a given title. Returns None if not found.
+    """
+    return next(
+        (track['videoId'] for track in out_tracks if track.get("title") == target_title),
+        None
+    )
+
 
 if __name__ == "__main__":
     # Example usage
@@ -61,3 +70,5 @@ if __name__ == "__main__":
     
     for v in verses:
         print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
+
+
