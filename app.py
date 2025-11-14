@@ -4,12 +4,13 @@ import time
 import requests
 from typing import Optional, List
 
-from fastapi import FastAPI, Query, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, Query, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from utils import detect_verses, find_video_id
 from fastapi.templating import Jinja2Templates
+import copy
 
 
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
@@ -39,6 +40,7 @@ RAPIDAPI_URL = f"https://{RAPIDAPI_HOST}/v1/social/spotify/musixmatchsearchlyric
 yt = YTMusic()
 
 out_tracks = []
+default_context = {}
 next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 templates = Jinja2Templates(directory="templates")
 
@@ -140,18 +142,26 @@ async def websocket_vol_endpoint(websocket: WebSocket):
         except Exception:
             pass
 
+@app.get("/", response_class=HTMLResponse)
+async def get_recommendations_as_webview(request: Request):
+    # global default_context
+    print(default_context)
+    default_context["request"] = request
+    return templates.TemplateResponse("recommendations.html", default_context)
+    
 
-@app.get("/recommendations/", response_class=HTMLResponse)
+@app.post("/recommendations/", response_class=HTMLResponse)
 async def get_recommendations_as_webview(request: Request,
-                        query: str = Query(..., example="MASAKALI"), 
-                        limit: int = Query(20, ge=1, le=50),
-                        nextPlay: bool = False,
-                        maxVol: int = Query(100, ge=1, le=100)):
+                        query: str = Form(..., example="MASAKALI"), 
+                        limit: int = Form(20, ge=1, le=50),
+                        nextPlay: bool = Form(False),
+                        maxVol: int = Form(100, ge=1, le=100)):
     """
     Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
     Returns a plain JSON dict to avoid Pydantic forward-ref issues.
     """
     global out_tracks
+    global default_context
     try:
         if nextPlay and out_tracks:
             nextID = find_video_id(out_tracks, query)
@@ -191,12 +201,14 @@ async def get_recommendations_as_webview(request: Request,
         # if nextPlay:
         #     next_song_dt["videoId"] = out_tracks[0]['videoId']
         context = {
-            "request": request,
             "query": query,
             "tracks": out_tracks,
             "recLimit": limit,
             "maxVol": maxVol,
         }
+
+        default_context = copy.deepcopy(context)
+        context["request"]=request
 
         return templates.TemplateResponse("recommendations.html", context)
 

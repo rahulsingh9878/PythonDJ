@@ -610,7 +610,7 @@
         </div>
         
         <div class="search-section">
-            <form id="trackForm" action="/recommendations/" method="GET">
+            <form id="trackForm" action="/recommendations/" method="POST">
                 <input type="radio" hidden id="nextPlay" name="nextPlay">
                 <input type="range" hidden id="maxVol" name="maxVol" min="0" max="100" value={{maxVol}}>
                 
@@ -745,7 +745,7 @@
             // Send volume to WebSocket
             if (volumeWs && volumeWs.readyState === WebSocket.OPEN) {
                 volumeWs.send(volume);
-                console.log('Sent volume:', volume);
+                // console.log('Sent volume:', volume);
             } else {
                 console.warn('Volume WebSocket not connected');
             }
