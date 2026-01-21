@@ -1,4 +1,7 @@
 import re
+import qrcode
+import base64
+from io import BytesIO
 
 def extract_time(line):
     """Extract timestamp (in seconds) from a line like [01:02.38]text"""
@@ -51,6 +54,23 @@ def find_video_id(out_tracks, target_title):
         (track['videoId'] for track in out_tracks if track.get("title") == target_title),
         None
     )
+
+def generate_qr_base64(url: str) -> str:
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill_color="black", back_color="white")
+
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return img_base64
 
 
 if __name__ == "__main__":

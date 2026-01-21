@@ -8,7 +8,11 @@ from fastapi import FastAPI, Query, Form, HTTPException, WebSocket, WebSocketDis
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
-from utils import detect_verses, find_video_id
+from utils import (
+    detect_verses, 
+    find_video_id,
+    generate_qr_base64
+)
 from fastapi.templating import Jinja2Templates
 import copy
 
@@ -16,7 +20,6 @@ import copy
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
 origins = [
     "https://rahulsingh9878.github.io",
-    "https://www.codechef.com/html-online-compiler",
     "http://localhost", # (Optional) Also allow your local computer for testing
     "http://127.0.0.1", # (Optional)
     "http://0.0.0.0:5500",
@@ -40,7 +43,7 @@ RAPIDAPI_URL = f"https://{RAPIDAPI_HOST}/v1/social/spotify/musixmatchsearchlyric
 yt = YTMusic()
 
 out_tracks = []
-default_context = {}
+default_context = {"recLimit": 30, "maxVol": 100}
 next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 templates = Jinja2Templates(directory="templates")
 
@@ -120,6 +123,7 @@ async def websocket_vol_endpoint(websocket: WebSocket):
     WebSocket clients send volume data here (ws://host:port/ws/vol/).
     Received messages are broadcasted to /ws/ctrlvol/ connections.
     """
+    global default_context
     await manager.connect_vol_control(websocket)
     try:
         while True:
@@ -128,6 +132,7 @@ async def websocket_vol_endpoint(websocket: WebSocket):
             # Broadcast the volume data to all /ws/ctrlvol/ connections
             try:
                 vol_data = {"volume": vol}
+                default_context["maxVol"] = vol
                 await manager.broadcast_vol_control(vol_data)
             except Exception as e:
                 print(f"Error broadcasting volume: {e}")
@@ -349,3 +354,18 @@ def get_track_lyrics_by_index(
     if verses:
         next_song_dt["timestamp"] = int(verses[0]['start_time'])
     return {"selected_track": selected, "verse": verses}
+
+@app.get("/qr", response_class=HTMLResponse)
+def show_qr(
+    request: Request,
+    url: str = Query("https://unappendaged-aretha-unwaning.ngrok-free.dev/")
+):
+    img_base64 = generate_qr_base64(url)
+    return templates.TemplateResponse(
+        "qr.html",
+        {
+            "request": request,
+            "url": url,
+            "qr_data": img_base64
+        }
+    )
