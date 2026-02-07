@@ -1,11 +1,13 @@
 # app.py
 import os
+import json
 import time
 import requests
 from typing import Optional, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import FastAPI, Query, Form, HTTPException, WebSocket, WebSocketDisconnect, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from utils import (
@@ -15,6 +17,7 @@ from utils import (
 )
 from fastapi.templating import Jinja2Templates
 import copy
+import random
 
 
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
@@ -46,175 +49,476 @@ out_tracks = []
 default_context = {"recLimit": 30, "maxVol": 100}
 next_song_dt = {"title": None, "videoId": None, "timestamp": 20}
 templates = Jinja2Templates(directory="templates")
+RESULT_CACHE = {}  # Simple cache for search results
 
-class ConnectionManager:
+
+class DJConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.vol_control_connections: List[WebSocket] = []  # Separate list for volume control
+        # All connected clients
+        self.all_connections: List[WebSocket] = []
+        # Clients identified as "player" (the main DJ screen)
+        self.player_connections: List[WebSocket] = []
+        # Clients identified as "controller" (phone remotes)
+        self.controller_connections: List[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, role: str = "controller"):
         await websocket.accept()
-        self.active_connections.append(websocket)
-
-    async def connect_vol_control(self, websocket: WebSocket):
-        await websocket.accept()
-        self.vol_control_connections.append(websocket)
+        self.all_connections.append(websocket)
+        if role == "player":
+            self.player_connections.append(websocket)
+        else:
+            self.controller_connections.append(websocket)
+        print(f"New {role} connected. Total: {len(self.all_connections)}")
 
     def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+        if websocket in self.all_connections:
+            self.all_connections.remove(websocket)
+        if websocket in self.player_connections:
+            self.player_connections.remove(websocket)
+        if websocket in self.controller_connections:
+            self.controller_connections.remove(websocket)
 
-    def disconnect_vol_control(self, websocket: WebSocket):
-        if websocket in self.vol_control_connections:
-            self.vol_control_connections.remove(websocket)
+    async def broadcast(self, message: dict, sender: WebSocket = None, target_role: str = None):
+        """
+        Broadcasts a message.
+        target_role: "player", "controller", or None (all)
+        """
+        targets = self.all_connections
+        if target_role == "player":
+            targets = self.player_connections
+        elif target_role == "controller":
+            targets = self.controller_connections
 
-    async def broadcast_json(self, message: dict):
-        # iterate copy to avoid mutation issues
-        for connection in list(self.active_connections):
+        for connection in list(targets):
+            if connection == sender:
+                continue
             try:
                 await connection.send_json(message)
             except Exception:
-                # If send fails, remove connection
-                try:
-                    await connection.close()
-                except Exception:
-                    pass
                 self.disconnect(connection)
 
-    async def broadcast_vol_control(self, message: dict):
-        # Broadcast to volume control connections
-        for connection in list(self.vol_control_connections):
-            try:
-                await connection.send_json(message)
-            except Exception:
-                # If send fails, remove connection
-                try:
-                    await connection.close()
-                except Exception:
-                    pass
-                self.disconnect_vol_control(connection)
+manager = DJConnectionManager()
 
-manager = ConnectionManager()
-
-@app.websocket("/ws/")
-async def websocket_endpoint(websocket: WebSocket):
+@app.websocket("/ws/sync")
+async def websocket_sync_hub(websocket: WebSocket, role: str = Query("controller")):
     """
-    WebSocket clients should connect here (ws://host:port/ws/).
-    They will receive JSON messages like {"video_id": "abc123"} when /play/ is POSTed.
+    Unified WebSocket Hub for all DJ operations.
+    Expected message format: {"type": "play|vol|control|qr|ping", "data": {...}}
     """
-    await manager.connect(websocket)
-    try:
-        while True:
-            # Keep connection alive. We don't expect messages from clients,
-            # but we can receive pings or optional messages.
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception:
-        manager.disconnect(websocket)
-        try:
-            await websocket.close()
-        except Exception:
-            pass
-
-@app.websocket("/ws/vol/")
-async def websocket_vol_endpoint(websocket: WebSocket):
-    """
-    WebSocket clients send volume data here (ws://host:port/ws/vol/).
-    Received messages are broadcasted to /ws/ctrlvol/ connections.
-    """
+    await manager.connect(websocket, role)
+    # Send initial state (e.g. current volume)
     global default_context
-    await manager.connect_vol_control(websocket)
+    await websocket.send_json({"type": "vol", "data": {"volume": default_context.get("maxVol", 100)}})
+    
     try:
         while True:
-            # Receive volume data from client
-            vol = await websocket.receive_text()
-            # Broadcast the volume data to all /ws/ctrlvol/ connections
-            try:
-                vol_data = {"volume": vol}
-                default_context["maxVol"] = vol
-                await manager.broadcast_vol_control(vol_data)
-            except Exception as e:
-                print(f"Error broadcasting volume: {e}")
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+            msg_data = data.get("data")
+
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong", "ts": time.time()})
             
+            elif msg_type == "play":
+                # Broadcast video update to everyone (especially players)
+                await manager.broadcast({"type": "play", "data": msg_data}, sender=websocket)
+            
+            elif msg_type == "vol":
+                default_context["maxVol"] = msg_data.get("volume")
+                # Sync volume to all other controllers and players
+                await manager.broadcast({"type": "vol", "data": msg_data}, sender=websocket)
+            
+            elif msg_type == "control":
+                # Sync playback control to everyone
+                await manager.broadcast({"type": "control", "data": msg_data}, sender=websocket)
+            
+            elif msg_type == "qr":
+                url = msg_data.get("url")
+                if url:
+                    img_base64 = generate_qr_base64(url)
+                    await websocket.send_json({"type": "qr", "data": {"img": img_base64, "url": url}})
+
     except WebSocketDisconnect:
-        pass
+        manager.disconnect(websocket)
     except Exception as e:
-        print(f"Error in /ws/vol/: {e}")
+        print(f"WebSocket Error: {e}")
+        manager.disconnect(websocket)
     finally:
         try:
             await websocket.close()
         except Exception:
             pass
 
+# Legacy endpoints kept for backward compatibility during transition if needed, 
+# but we should move everything to /ws/sync
+@app.websocket("/ws/")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            await websocket.receive_text()
+    except: pass
+
+@app.websocket("/ws/vol/")
+async def websocket_vol_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            vol = await websocket.receive_text()
+            await manager.broadcast({"type": "vol", "data": {"volume": vol}})
+    except: pass
+
+@app.websocket("/ws/qr/")
+async def websocket_qr_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            url = await websocket.receive_text()
+            if url:
+                img_base64 = generate_qr_base64(url)
+                await websocket.send_text(img_base64)
+    except: pass
+
+@app.websocket("/ws/player/")
+async def websocket_player_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.broadcast({"type": "control", "data": json.loads(data)})
+    except: pass
+
+
+
 @app.get("/", response_class=HTMLResponse)
-async def get_recommendations_as_webview(request: Request):
+async def index_webview(request: Request):
     # global default_context
-    print(default_context)
+    # print(default_context)
     default_context["request"] = request
+    if "music_type" not in default_context:
+        default_context["music_type"] = "songs"
     return templates.TemplateResponse("recommendations.html", default_context)
     
 
-@app.post("/recommendations/", response_class=HTMLResponse)
+@app.post("/recommendations/")
 async def get_recommendations_as_webview(request: Request,
                         query: str = Form(..., example="MASAKALI"), 
                         limit: int = Form(20, ge=1, le=50),
                         nextPlay: bool = Form(False),
-                        maxVol: int = Form(100, ge=1, le=100)):
+                        maxVol: int = Form(100, ge=1, le=100),
+                        music_type: str = Form("songs"),
+                        videoId: Optional[str] = Form(None),
+                        refresh: bool = Form(False)):
     """
     Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
     Returns a plain JSON dict to avoid Pydantic forward-ref issues.
     """
+    print(f"Searching for: {query} (type: {music_type}, videoId: {videoId}, refresh: {refresh})")
     global out_tracks
     global default_context
     try:
-        if nextPlay and out_tracks:
-            nextID = find_video_id(out_tracks, query)
-            next_song_dt["videoId"] = nextID if nextID else next_song_dt["videoId"]
-            next_song_dt["title"] = query
-            await manager.broadcast_json(next_song_dt)
-        search_results = yt.search(query, filter="songs", limit=1)
-        if not search_results:
-            raise HTTPException(status_code=404, detail="No search results found on YouTube Music")
+        target_id = None
+        exclude_title = None
 
-        top_song = search_results[0]
-        top_video_id = top_song.get("videoId")
-        if not top_video_id:
-            raise HTTPException(status_code=404, detail="Top search result has no videoId")
+        if refresh and out_tracks:
+            # Anchor recommendations to the first track but don't play it
+            first = out_tracks[0]
+            target_id = first.get("videoId")
+            query = first.get("title")
+            exclude_title = query.lower()
+        elif nextPlay:
+            # If videoId is provided from frontend, use it; otherwise look it up in out_tracks
+            target_id = videoId if videoId else (find_video_id(out_tracks, query) if out_tracks else None)
+            exclude_title = query.lower()
+            
+            if target_id:
+                play_data = {
+                    "videoId": target_id,
+                    "title": query,
+                    "timestamp": 20
+                }
+                await manager.broadcast({"type": "play", "data": play_data})
 
-        recs = yt.get_watch_playlist(videoId=top_video_id)
-        tracks = recs.get("tracks", [])[:limit]
-        # print(tracks)
-        out_tracks = []
-        for idx, t in enumerate(tracks):
-            title = t.get("title", "")
-            artists = t.get("artists", [])
-            thumbnail = t.get("thumbnail", [])[0]["url"]
-            artist_name = artists[0]["name"] if artists else "Unknown Artist"
-            video_id = t.get("videoId", "")
-            url = f"https://music.youtube.com/watch?v={video_id}" if video_id else ""
-            out_tracks.append({
-                "index": idx,
-                "title": title,
-                "artist": artist_name,
-                "videoId": video_id,
-                "music_url": url, 
-                "thumbnail": thumbnail,
-            })
+        # Check cache first to avoid redundant API calls
+        cache_key = f"{query}_{limit}"
+        if videoId:
+            cache_key += f"_{videoId}"
+            
+        if cache_key in RESULT_CACHE and not refresh:
+            cached_context = RESULT_CACHE[cache_key]
+            if request.headers.get("Accept") == "application/json":
+                return JSONResponse(content=cached_context)
+            return templates.TemplateResponse("recommendations.html", {**cached_context, "request": request})
 
-        # return {"query": query, "tracks": out_tracks}
-        # if nextPlay:
-        #     next_song_dt["videoId"] = out_tracks[0]['videoId']
+        def process_results(results, result_type, filter_title=None):
+            """Optimized result processing with label detection and high-res thumbnails"""
+            if not results:
+                return []
+            
+            processed = []
+            for t in results:
+                title = t.get("title", "")
+                if not title:
+                    continue
+                
+                # Filter out same titles if requested
+                if filter_title and title.lower() == filter_title:
+                    continue
+                    
+                artists = t.get("artists", [])
+                artist_name = artists[0]["name"] if artists else ""
+                video_id = t.get("videoId", "")
+                if not video_id:
+                    continue
+
+                # --- NEW: Label Detection ---
+                title_lower = title.lower()
+                labels = []
+                
+                # Check for labels
+                if any(x in title_lower for x in ["official video", "official music video", "(official video)", "official audio"]):
+                    labels.append("Official")
+                if any(x in title_lower for x in ["remix", "re-mix", "rmx"]):
+                    labels.append("Remix")
+                if any(x in title_lower for x in ["slowed", "slowed + reverb", "slowed and reverb"]):
+                    labels.append("Slowed")
+                if "live" in title_lower and "deliver" not in title_lower:
+                    labels.append("Live")
+                if any(x in title_lower for x in ["lyrical", "lyrics"]):
+                    labels.append("Lyrics")
+                if "cover" in title_lower:
+                    labels.append("Cover")
+                if "mashup" in title_lower:
+                    labels.append("Mashup")
+                
+                # --- NEW: Sorting Weight ---
+                # Give higher weight to official content
+                weight = 0
+                if "Official" in labels: weight += 10
+                if result_type == "song" and t.get("type") == "MUSIC_VIDEO_TYPE_OFFICIAL_RELEASE": weight += 5
+
+                # ytmusicapi search results use 'thumbnails', watch playlist uses 'thumbnail'
+                thumbnails = t.get("thumbnails", t.get("thumbnail", []))
+                thumbnail_url = ""
+                
+                if thumbnails:
+                    if isinstance(thumbnails, list) and len(thumbnails) > 0 and isinstance(thumbnails[0], list):
+                        thumbnails = thumbnails[0]
+                    
+                    if isinstance(thumbnails, list) and len(thumbnails) > 0:
+                        try:
+                            best_thumb = max(thumbnails, key=lambda x: int(x.get('width', 0)) * int(x.get('height', 0)))
+                            thumbnail_url = best_thumb.get("url", "")
+                        except:
+                            thumbnail_url = thumbnails[0].get("url", "")
+                    elif isinstance(thumbnails, dict):
+                        thumbnail_url = thumbnails.get("url", "")
+
+                if thumbnail_url and "googleusercontent.com" in thumbnail_url:
+                    if "=" in thumbnail_url:
+                        base_url = thumbnail_url.split("=")[0]
+                        thumbnail_url = f"{base_url}=w512-h512-l90-rj"
+                    elif "-s" in thumbnail_url:
+                        base_name = thumbnail_url.split("-s")[0]
+                        thumbnail_url = f"{base_name}-s512-c"
+                
+                if not thumbnail_url and video_id:
+                    thumbnail_url = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+                
+                url = f"https://music.youtube.com/watch?v={video_id}"
+                
+                processed.append({
+                    "title": title,
+                    "artist": artist_name,
+                    "videoId": video_id,
+                    "music_url": url, 
+                    "thumbnail": thumbnail_url,
+                    "type": result_type,
+                    "labels": labels,
+                    "weight": weight
+                })
+            
+            # Sort by weight descending (Official first)
+            processed.sort(key=lambda x: x['weight'], reverse=True)
+            return processed
+
+        def fetch_song_search():
+            """Fetch initial song search results"""
+            try:
+                return yt.search(query, filter="songs", limit=3)
+            except Exception as e:
+                print(f"Error in song search: {e}")
+                return []
+
+        def fetch_video_search():
+            """Fetch initial video search results"""
+            try:
+                return yt.search(query, filter="videos", limit=3)
+            except Exception as e:
+                print(f"Error in video search: {e}")
+                return []
+
+        def fetch_song_recommendations(video_id):
+            """Fetch song recommendations based on video ID"""
+            try:
+                return yt.get_watch_playlist(videoId=video_id)
+            except Exception as e:
+                print(f"Error fetching song recommendations: {e}")
+                return {"tracks": []}
+
+        def fetch_video_recommendations(video_id):
+            """Fetch video recommendations based on video ID"""
+            try:
+                return yt.get_watch_playlist(videoId=video_id)
+            except Exception as e:
+                print(f"Error fetching video recommendations: {e}")
+                return {"tracks": []}
+
+        # Phase 1: Parallel search for both songs and videos
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            song_search_future = executor.submit(fetch_song_search)
+            video_search_future = executor.submit(fetch_video_search)
+            
+            song_search_results = song_search_future.result()
+            video_search_results = video_search_future.result()
+
+        # Process initial search results
+        song_tracks = process_results(song_search_results, "song", filter_title=exclude_title)
+        video_tracks = process_results(video_search_results, "video", filter_title=exclude_title)
+
+        # Phase 2: Parallel fetch recommendations (only if we have initial results or a target_id)
+        song_recs_future = None
+        video_recs_future = None
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            if target_id or song_tracks:
+                anchor_id = target_id if target_id else song_tracks[0]["videoId"]
+                song_recs_future = executor.submit(fetch_song_recommendations, anchor_id)
+            if target_id or video_tracks:
+                anchor_id = target_id if target_id else video_tracks[0]["videoId"]
+                video_recs_future = executor.submit(fetch_video_recommendations, anchor_id)
+            
+            # Get recommendations results
+            if song_recs_future:
+                song_recs_data = song_recs_future.result()
+                song_recs = process_results(song_recs_data.get("tracks", []), "song", filter_title=exclude_title)
+                # Filter out duplicates and add to song_tracks
+                existing_ids = {t["videoId"] for t in song_tracks}
+                if target_id: existing_ids.add(target_id) # Ensure playing song isn't added back
+                
+                for r in song_recs:
+                    if r["videoId"] not in existing_ids:
+                        song_tracks.append(r)
+                        existing_ids.add(r["videoId"])
+                        if len(song_tracks) >= limit:
+                            break
+            
+            if video_recs_future:
+                video_recs_data = video_recs_future.result()
+                video_recs = process_results(video_recs_data.get("tracks", []), "video", filter_title=exclude_title)
+                # Filter out duplicates and add to video_tracks
+                existing_ids = {t["videoId"] for t in video_tracks}
+                if target_id: existing_ids.add(target_id)
+                
+                for r in video_recs:
+                    if r["videoId"] not in existing_ids:
+                        video_tracks.append(r)
+                        existing_ids.add(r["videoId"])
+                        if len(video_tracks) >= limit:
+                            break
+
+        # --- Custom Reordering for Selection (nextPlay) or Refresh ---
+        if nextPlay or refresh:
+            # Fallback if target_id is still missing
+            if not target_id:
+                if song_tracks: target_id = song_tracks[0]["videoId"]
+                elif video_tracks: target_id = video_tracks[0]["videoId"]
+
+            def reorder_for_selection(tracks, tid, q, is_refresh):
+                if not tracks: return []
+                
+                playing = None
+                others = []
+                q_lower = q.lower()
+                
+                # 1. Extract playing song by ID (only if not refreshing, or keep it for filtering)
+                if tid:
+                    for t in tracks:
+                        if t.get('videoId') == tid:
+                            playing = t
+                        else:
+                            others.append(t)
+                else:
+                    others = tracks
+
+                # 2. Fallback: Extract playing song by Title match if ID failed
+                if not playing and others:
+                    for i, t in enumerate(others):
+                        t_title = t.get('title', '').lower()
+                        if q_lower == t_title or q_lower in t_title:
+                            playing = others.pop(i)
+                            break
+                
+                # 3. Final Fallback: If still nothing and nextPlay, just take the first one
+                if not playing and others and not is_refresh:
+                    playing = others.pop(0)
+                
+                # 4. Partition others into matches and non-matches
+                matches = []
+                non_matches = []
+                for t in others:
+                    t_title = t.get('title', '').lower()
+                    if q_lower in t_title:
+                        matches.append(t)
+                    else:
+                        non_matches.append(t)
+                
+                # 5. Randomize both categories (keeping it fresh)
+                random.shuffle(matches)
+                random.shuffle(non_matches)
+                
+                # 6. Construct Final Order
+                final = []
+                # If nextPlay (manually selected a song), put it at top
+                if playing and not is_refresh:
+                    final.append(playing)
+                
+                final.extend(non_matches)
+                final.extend(matches)
+                
+                # If refresh, the 'playing' song is completely excluded (not added back)
+                return final
+
+            song_tracks = reorder_for_selection(song_tracks, target_id, query, refresh)
+            video_tracks = reorder_for_selection(video_tracks, target_id, query, refresh)
+
+        # Combine them for the global out_tracks
+        out_tracks = song_tracks + video_tracks
+        
+        # Add index to each for the template
+        for idx, t in enumerate(out_tracks):
+            t["index"] = idx
+
         context = {
             "query": query,
             "tracks": out_tracks,
+            "song_tracks": song_tracks,
+            "video_tracks": video_tracks,
             "recLimit": limit,
             "maxVol": maxVol,
+            "music_type": music_type,
         }
 
         default_context = copy.deepcopy(context)
-        context["request"]=request
+        
+        # Store in cache for future requests
+        RESULT_CACHE[cache_key] = context
 
+        # Check for AJAX/API request - return JSON if requested
+        if request.headers.get("Accept") == "application/json":
+            return JSONResponse(content=context)
+
+        context["request"] = request
         return templates.TemplateResponse("recommendations.html", context)
 
     except requests.HTTPError as e:
@@ -355,17 +659,12 @@ def get_track_lyrics_by_index(
         next_song_dt["timestamp"] = int(verses[0]['start_time'])
     return {"selected_track": selected, "verse": verses}
 
-@app.get("/qr", response_class=HTMLResponse)
-def show_qr(
-    request: Request,
+@app.get("/qr")
+def get_qr(
     url: str = Query("https://unappendaged-aretha-unwaning.ngrok-free.dev/")
 ):
+    """
+    Returns the raw base64 encoded QR code string.
+    """
     img_base64 = generate_qr_base64(url)
-    return templates.TemplateResponse(
-        "qr.html",
-        {
-            "request": request,
-            "url": url,
-            "qr_data": img_base64
-        }
-    )
+    return img_base64
