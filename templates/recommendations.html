@@ -181,15 +181,26 @@
             padding: 10px 24px;
             border-radius: var(--radius-lg);
             cursor: pointer;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 700;
-            transition: all 0.2s;
-            color: #fff;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            color: rgba(255, 255, 255, 0.5);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .type-option:hover {
+            color: rgba(255, 255, 255, 0.8);
+            transform: translateY(-1px);
         }
 
         .type-option.active {
-            background: #fff;
+            background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
             color: #000;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(255, 255, 255, 0.15);
+            transform: scale(1.02);
         }
 
         .sort-pill {
@@ -302,6 +313,13 @@
             gap: 8px;
             font-size: 13px;
             color: var(--text-dim);
+        }
+
+        .track-artist-row>span:first-child {
+            max-width: 20ch;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .badge {
@@ -442,6 +460,29 @@
             cursor: pointer;
         }
 
+        .track-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .radio-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 8px;
+            cursor: pointer;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .radio-btn:hover {
+            color: var(--primary);
+            background: rgba(255, 255, 255, 0.1);
+        }
+
         /* --- Bottom Nav --- */
         .bottom-nav {
             position: fixed;
@@ -450,20 +491,27 @@
             right: 0;
             background: #000;
             display: flex;
-            justify-content: space-around;
-            padding: 12px 0 32px;
+            align-items: center;
+            /* Use safe area for bottom padding */
+            padding: 12px 0 calc(16px + env(safe-area-inset-bottom));
             border-top: 1px solid var(--border);
             z-index: 1002;
+            width: 100%;
+            height: auto;
         }
 
         .nav-item {
+            flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
+            justify-content: center;
             color: var(--text-muted);
             text-decoration: none;
             font-size: 11px;
             gap: 4px;
+            min-width: 0;
+            padding: 4px 0;
         }
 
         .nav-item.active {
@@ -473,6 +521,55 @@
         .nav-item svg {
             width: 24px;
             height: 24px;
+            display: block;
+        }
+
+        /* Responsive adjustments for small screens (e.g. iPhone SE 320px) */
+        /* Responsive adjustments for small screens (e.g. iPhone SE 320px) */
+        @media (max-width: 400px) {
+            .bottom-nav {
+                padding-top: 10px;
+                padding-bottom: calc(12px + env(safe-area-inset-bottom));
+            }
+
+            .nav-item {
+                font-size: 10px;
+                gap: 2px;
+            }
+
+            .nav-item svg {
+                width: 20px;
+                height: 20px;
+            }
+
+            /* Responsive Sort & Type Pills */
+            .sort-pill {
+                padding: 6px 8px;
+                /* Reduced side padding (was 10px) */
+                font-size: 10px;
+                /* Reduced font size (was 11px) */
+                white-space: nowrap;
+                /* Prevent text wrapping */
+            }
+
+            .type-option {
+                padding: 6px 12px;
+                /* Reduced from 8px 16px */
+                font-size: 10px;
+                /* Reduced from 11px */
+                white-space: nowrap;
+            }
+
+            .nav-row {
+                padding: 0 0px;
+                gap: 4px;
+                /* Explicit gap between left and right groups */
+            }
+
+            /* Target the flex container for refresh/sort buttons to reduce its gap */
+            .nav-row>div:last-child {
+                gap: 4px !important;
+            }
         }
 
         @keyframes slideUp {
@@ -650,7 +747,13 @@
                     </svg>
                     <span>Premium DJ</span>
                 </div>
-                <div class="header-right">
+                <div class="header-right" style="display: flex; gap: 8px;">
+                    <button class="icon-btn" onclick="toggleSearch()" title="Search">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                        </svg>
+                    </button>
                     <button class="icon-btn" onclick="toggleQR(event)" title="Share Control">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -672,20 +775,32 @@
                 <input type="hidden" name="limit" value="{{recLimit}}">
 
                 <div class="search-box" id="searchBox">
-                    <input type="text" name="query" id="queryInput" class="search-input"
-                        placeholder="What do you want to play?" value="{{ query }}" autocomplete="off">
+                    <input type="text" id="queryInput" name="query" class="search-input"
+                        placeholder="Search song or artist..." value="{{ query }}" autocomplete="off">
                     <div class="search-actions">
-                        <button type="button" class="clear-btn" id="clearSearch">✕</button>
-                        <button type="submit" class="search-button">Search</button>
+                        <button type="button" class="clear-btn" id="clearBtn" onclick="clearSearch()"
+                            style="display: none;">✕</button>
+                        <button type="submit" class="search-button">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path
+                                    d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                            </svg>
+                        </button>
                     </div>
                 </div>
 
                 <div class="nav-row">
                     <div class="type-toggle-pill">
                         <div class="type-option {% if music_type == 'songs' or not music_type %}active{% endif %}"
-                            onclick="setType('songs')">Songs</div>
+                            onclick="setType('songs')" data-type="songs">
+                            <span>🎵</span>
+                            <span>Songs</span>
+                        </div>
                         <div class="type-option {% if music_type == 'videos' %}active{% endif %}"
-                            onclick="setType('videos')">Videos</div>
+                            onclick="setType('videos')" data-type="videos">
+                            <span>🎬</span>
+                            <span>Videos</span>
+                        </div>
                     </div>
                     <div style="display: flex; gap: 8px;">
                         <button type="button" class="sort-pill" id="refreshBtn" onclick="submitSearch(null, true)"
@@ -841,6 +956,15 @@
             </svg>
             <span>Explore</span>
         </a>
+        <a href="javascript:void(0)" class="nav-item" onclick="fetchCharts()" title="Trending">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" style="color:#ff5722;">
+                <path
+                    d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.1.2-2.2.6-3.268.3 1.17.66 2.073 1.9 2.768z">
+                </path>
+            </svg>
+            <span>Trending</span>
+        </a>
         <a href="javascript:void(0)" class="nav-item" onclick="toggleVolumePopover(event)">
             <svg viewBox="0 0 24 24" fill="currentColor">
                 <path
@@ -872,6 +996,11 @@
 
 
     <script>
+        // --- 1. Global Elements & Init ---
+        const queryInput = document.getElementById('queryInput');
+        const clearBtn = document.getElementById('clearBtn'); // Use clearBtn ID from HTML
+        const searchBox = document.getElementById('searchBox');
+
         function handleImageError(img, videoId) {
             const fallbacks = [`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`];
             let currentIdx = fallbacks.indexOf(img.src);
@@ -879,40 +1008,50 @@
             else img.onerror = null;
         }
 
-        const queryInput = document.getElementById('queryInput');
-        const clearBtn = document.getElementById('clearSearch');
-        function toggleClearBtn() { clearBtn.style.display = queryInput.value.length > 0 ? 'block' : 'none'; }
-        queryInput.addEventListener('input', toggleClearBtn);
-        clearBtn.addEventListener('click', () => { queryInput.value = ''; toggleClearBtn(); queryInput.focus(); });
-        toggleClearBtn();
+        // --- 2. Search Logic ---
+        function toggleClearBtn() {
+            if (clearBtn && queryInput) {
+                clearBtn.style.display = queryInput.value.length > 0 ? 'block' : 'none';
+            }
+        }
 
-        const searchBox = document.getElementById('searchBox');
+        if (queryInput && clearBtn) {
+            queryInput.addEventListener('input', toggleClearBtn);
+            clearBtn.addEventListener('click', () => { queryInput.value = ''; toggleClearBtn(); queryInput.focus(); });
+            toggleClearBtn();
+        }
+
         let searchHideTimer = null;
 
         function resetSearchTimer() {
             if (searchHideTimer) clearTimeout(searchHideTimer);
             searchHideTimer = setTimeout(() => {
-                if (document.activeElement !== queryInput) {
+                if (document.activeElement !== queryInput && searchBox) {
                     searchBox.classList.remove('visible');
                 } else {
-                    // If still focused, try again in 3s
-                    resetSearchTimer();
+                    // If still focused, try again in 3s, but only if visible
+                    if (searchBox && searchBox.classList.contains('visible')) {
+                        resetSearchTimer();
+                    }
                 }
-            }, 3000);
+            }, 5000); // 5s is better than 3s
         }
 
-        queryInput.addEventListener('input', () => {
-            toggleClearBtn();
-            resetSearchTimer();
-        });
-        queryInput.addEventListener('focus', resetSearchTimer);
-        searchBox.addEventListener('mousedown', resetSearchTimer);
-        searchBox.addEventListener('touchstart', resetSearchTimer);
+        if (queryInput && searchBox) {
+            queryInput.addEventListener('input', () => {
+                toggleClearBtn();
+                resetSearchTimer();
+            });
+            queryInput.addEventListener('focus', resetSearchTimer);
+            searchBox.addEventListener('mousedown', resetSearchTimer);
+            searchBox.addEventListener('touchstart', resetSearchTimer);
+        }
 
         function toggleSearch() {
+            if (!searchBox) return;
             searchBox.classList.toggle('visible');
             if (searchBox.classList.contains('visible')) {
-                queryInput.focus();
+                if (queryInput) queryInput.focus();
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 resetSearchTimer();
             }
@@ -951,9 +1090,14 @@
                                 ${(t.labels || []).map(l => `<span class="badge ${l === 'Official' ? 'badge-official' : l === 'Remix' ? 'badge-remix' : l === 'Dance' ? 'badge-dance' : l === 'Slowed' ? 'badge-slowed' : ''}">${l}</span>`).join('')}
                             </div>
                         </div>
-                        <button class="menu-btn" onclick="event.stopPropagation()">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" /></svg>
-                        </button>
+                        <div class="track-actions">
+                             <button class="radio-btn" onclick="event.stopPropagation(); startRadio('${t.videoId}')" title="Start Radio">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
+                            </button>
+                            <button class="menu-btn" onclick="event.stopPropagation()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" /></svg>
+                            </button>
+                        </div>
                     </div>`;
 
                 const sCont = document.getElementById('songsContainer');
@@ -987,14 +1131,35 @@
         function setType(type) {
             document.getElementById('musicTypeInput').value = type;
             document.querySelectorAll('.type-option').forEach(opt => {
-                opt.classList.toggle('active', opt.textContent.trim().toLowerCase() === type);
+                const isActive = opt.dataset.type === type;
+                opt.classList.toggle('active', isActive);
             });
             document.getElementById('songsContainer').style.display = type === 'songs' ? 'block' : 'none';
             document.getElementById('videosContainer').style.display = type === 'videos' ? 'block' : 'none';
+
+            // Save preference to localStorage
+            try {
+                localStorage.setItem('preferredMusicType', type);
+            } catch (e) {
+                console.warn('Could not save tab preference:', e);
+            }
+
             // Update stats
             const count = document.getElementById(type + 'Container').querySelectorAll('.track-item').length;
             document.querySelector('.results-meta span').textContent = `${count} results • ${count} results`;
         }
+
+        // Restore last selected tab on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            try {
+                const savedType = localStorage.getItem('preferredMusicType');
+                if (savedType && (savedType === 'songs' || savedType === 'videos')) {
+                    setType(savedType);
+                }
+            } catch (e) {
+                console.warn('Could not restore tab preference:', e);
+            }
+        });
 
 
 
@@ -1144,6 +1309,122 @@
 
         let isPlaying = false;
         let lastUserActionTime = 0;
+
+        async function startRadio(videoId) {
+            document.body.classList.add('searching');
+            const formData = new FormData();
+            formData.append('videoId', videoId);
+            formData.append('limit', 50);
+
+            try {
+                const response = await fetch('/radio/', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!response.ok) throw new Error('Radio start failed');
+                const data = await response.json();
+
+                // Re-use the render logic
+                const render = (t, i) => `
+                    <div class="track-item" data-title="${t.title}" data-videoid="${t.videoId}" data-thumb="${t.thumbnail}" data-artist="${t.artist}">
+                        <div class="track-index">${i}</div>
+                        <div class="track-thumb-box">
+                            <img src="${t.thumbnail}" alt="${t.title}" class="track-thumbnail" onerror="handleImageError(this, '${t.videoId}')">
+                        </div>
+                        <div class="track-info">
+                            <div class="track-title">${t.title}</div>
+                            <div class="track-artist-row">
+                                <span>${t.artist}</span>
+                                ${(t.labels || []).map(l => `<span class="badge ${l === 'Official' ? 'badge-official' : l === 'Remix' ? 'badge-remix' : l === 'Dance' ? 'badge-dance' : l === 'Slowed' ? 'badge-slowed' : l === 'Top Song' ? 'badge-official' : l === 'Trending' ? 'badge-dance' : ''}">${l}</span>`).join('')}
+                            </div>
+                        </div>
+                         <div class="track-actions">
+                             <button class="radio-btn" onclick="event.stopPropagation(); startRadio('${t.videoId}')" title="Start Radio">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
+                            </button>
+                            <button class="menu-btn" onclick="event.stopPropagation()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" /></svg>
+                            </button>
+                        </div>
+                    </div>`;
+
+                const sCont = document.getElementById('songsContainer');
+                const vCont = document.getElementById('videosContainer');
+
+                // Populate both containers
+                sCont.innerHTML = (data.tracks || []).map((t, i) => render(t, i + 1)).join('');
+                vCont.innerHTML = (data.videos || []).map((t, i) => render(t, i + 1)).join('');
+
+                // Show both
+                document.getElementById('songsContainer').style.display = 'block';
+                document.getElementById('videosContainer').style.display = 'block';
+                document.querySelector('.results-meta span').textContent = `Radio Mix • Dual Playlist`;
+
+                // Update type toggle if needed, or leave it to show generic view
+                queryInput.value = "";
+
+            } catch (err) {
+                console.error(err);
+                alert("Failed to start radio mode");
+            } finally {
+                document.body.classList.remove('searching');
+            }
+        }
+
+        async function fetchCharts() {
+            document.body.classList.add('searching');
+            try {
+                const response = await fetch('/charts/?country=IN');
+                if (!response.ok) throw new Error('Charts fetch failed');
+                const data = await response.json();
+
+                // Re-use the render logic
+                const render = (t, i) => `
+                    <div class="track-item" data-title="${t.title}" data-videoid="${t.videoId}" data-thumb="${t.thumbnail}" data-artist="${t.artist}">
+                        <div class="track-index">${i}</div>
+                        <div class="track-thumb-box">
+                            <img src="${t.thumbnail}" alt="${t.title}" class="track-thumbnail" onerror="handleImageError(this, '${t.videoId}')">
+                        </div>
+                        <div class="track-info">
+                            <div class="track-title">${t.title}</div>
+                            <div class="track-artist-row">
+                                <span>${t.artist}</span>
+                                ${(t.labels || []).map(l => `<span class="badge ${l === 'Official' ? 'badge-official' : l === 'Top Song' ? 'badge-official' : l === 'Trending' ? 'badge-dance' : 'badge-remix'}">${l}</span>`).join('')}
+                            </div>
+                        </div>
+                         <div class="track-actions">
+                             <button class="radio-btn" onclick="event.stopPropagation(); startRadio('${t.videoId}')" title="Start Radio">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
+                            </button>
+                            <button class="menu-btn" onclick="event.stopPropagation()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" /></svg>
+                            </button>
+                        </div>
+                    </div>`;
+
+                const sCont = document.getElementById('songsContainer');
+                const vCont = document.getElementById('videosContainer');
+
+                // Top Songs -> Left Column
+                sCont.innerHTML = data.top_songs.length ? data.top_songs.map((t, i) => render(t, i + 1)).join('') : '';
+
+                // Top Videos -> Right Column (or we can put Trending here)
+                vCont.innerHTML = data.top_videos.length ? data.top_videos.map((t, i) => render(t, i + 1)).join('') : '';
+
+                document.getElementById('musicTypeInput').value = 'songs';
+                document.getElementById('songsContainer').style.display = 'block';
+                document.getElementById('videosContainer').style.display = 'block';
+                document.querySelector('.results-meta span').textContent = `Trending • Top 20`;
+
+                queryInput.value = ""; // clear query because it's charts
+
+            } catch (err) {
+                console.error(err);
+                alert("Failed to load charts");
+            } finally {
+                document.body.classList.remove('searching');
+            }
+        }
 
         function toggleQR(e) {
             e.stopPropagation();

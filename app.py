@@ -11,16 +11,26 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from utils import (
-    detect_verses, 
-    find_video_id,
     generate_qr_base64
 )
 from fastapi.templating import Jinja2Templates
 import copy
 import random
+import asyncio
+from recommender_system import AsyncIndianMusicRecommender
+
 
 
 app = FastAPI(title="YTMusic -> Lyrics FastAPI (no forward refs)", version="1.0")
+
+# Initialize Global Recommender
+recommender = AsyncIndianMusicRecommender()
+
+@app.on_event("startup")
+async def startup_event():
+    """Start building the music database in the background on app startup."""
+    asyncio.create_task(recommender.build_all_collections())
+
 origins = [
     "https://rahulsingh9878.github.io",
     "http://localhost", # (Optional) Also allow your local computer for testing
@@ -559,28 +569,43 @@ def get_lyrics(title: str = Query(..., example="MASAKALI"), artist: Optional[str
     return {"status": data.get("status", resp.status_code), "data": data.get("data", data)}
 
 
-def fetch_lyrics(title: str, artist: str = None, delay: float = 0.5) -> dict:
+def fetch_lyrics(title: str, artist: str = None, browseId: str = None, delay: float = 0.5) -> dict:
     """
-    Fetch lyrics using the RapidAPI Musixmatch wrapper.
+    Fetch lyrics, trying YouTube Music first (free/official), then falling back to RapidAPI.
 
     Args:
-        title (str): Song title to search for
-        artist (str, optional): Artist name (recommended for accuracy)
-        delay (float, optional): Sleep time before request to avoid rate-limit issues
+        title (str): Song title
+        artist (str, optional): Artist name
+        browseId (str, optional): The detailed song ID (not videoId) needed for YT lyrics.
+        delay (float, optional): Sleep time for RapidAPI fallback
 
     Returns:
-        dict: {
-            "status": int,
-            "data": dict (raw RapidAPI response)
-        }
-
-    Raises:
-        HTTPException: If API key missing or HTTP errors occur
+        dict: Standardized structure: { "status": 200, "data": { "lyrics": "...", "source": "YT"|"RapidAPI" } }
     """
 
-    if not RAPIDAPI_KEY:
-        raise HTTPException(status_code=500, detail="Missing RAPIDAPI_KEY environment variable")
+    # 1. Try YouTube Music Lyrics (Official & Free)
+    if browseId:
+        try:
+            print(f"Fetching YT lyrics for browseId: {browseId}")
+            lyrics_data = yt.get_lyrics(browseId)
+            if lyrics_data and "lyrics" in lyrics_data:
+                return {
+                    "status": 200, 
+                    "data": {
+                        "lyrics": lyrics_data["lyrics"], 
+                        "source": "YT",
+                        "provider": lyrics_data.get("source", "YouTube Music")
+                    }
+                }
+        except Exception as e:
+            print(f"YT lyrics fetch failed: {e}")
 
+    # 2. Fallback to RapidAPI (Musixmatch)
+    if not RAPIDAPI_KEY:
+        # If no key and YT failed, we have nothing
+        return {"status": 404, "error": "No lyrics found (YT failed, no RapidAPI key)"}
+
+    # ... existing RapidAPI logic ...
     params = {"terms": title}
     if artist:
         params["artist"] = artist
@@ -594,14 +619,21 @@ def fetch_lyrics(title: str, artist: str = None, delay: float = 0.5) -> dict:
     time.sleep(delay)
 
     try:
+        print(f"Falling back to RapidAPI for: {title}")
         resp = requests.get(RAPIDAPI_URL, headers=headers, params=params, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-        return {"status": data.get("status", resp.status_code), "data": data.get("data", data)}
+        # Wrap it to preserve existing structure while noting source
+        return {
+            "status": data.get("status", resp.status_code), 
+            "data": data.get("data", data),
+            "source": "RapidAPI"
+        }
     except requests.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"RapidAPI HTTP error: {e} - {resp.text[:500]}")
+        print(f"RapidAPI failed: {e}") 
+        return {"status": 502, "error": str(e)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        return {"status": 500, "error": str(e)}
 
 @app.get("/track/{idx}/")
 def get_track_lyrics_by_index(
@@ -642,29 +674,234 @@ def get_track_lyrics_by_index(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Step 2: call lyrics endpoint (if RAPIDAPI_KEY present)
-    if not RAPIDAPI_KEY:
-        return {"selected_track": selected, "lyrics_response": {"status": 500, "error": "Missing RAPIDAPI_KEY environment variable"}}
-
-    lyrics_response = fetch_lyrics(title, artist_name)
+    # Step 2: call lyrics endpoint
+    # Extract browseId if available (often in 'browseId' or 'album' -> 'id' depending on object)
+    # in search results, top-level 'browseId' is for the song.
+    browse_id = t.get("browseId")
+    
+    lyrics_response = fetch_lyrics(title, artist_name, browseId=browse_id)
+    
     verses = []
-    if lyrics_response.get("data"):
-        verses = detect_verses(lyrics_response.get("data"), gap_threshold=8.0)
-        for v in verses:
-            print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
+    lyrics_data = lyrics_response.get("data")
+    
+    if lyrics_data:
+        if lyrics_response.get("source") == "YT":
+             # Process plain text lyrics from YT
+             raw_text = lyrics_data.get("lyrics", "")
+             # Simple split by paragraphs for now to simulate verses
+             blocks = raw_text.split("\n\n")
+             for i, block in enumerate(blocks):
+                 if block.strip():
+                     verses.append({
+                         "index": i,
+                         "start_time": 0 if i == 0 else -1, # No timestamps in scraping usually
+                         "end_time": -1,
+                         "first_line": block.strip().split("\n")[0] if block else "",
+                         "text": block.strip()
+                     })
+        else:
+            # Existing RapidAPI logic
+            verses = detect_verses(lyrics_data, gap_threshold=8.0)
+            for v in verses:
+                print(f"Verse {v['index']+1}: starts at {v['start_time']}s → '{v['first_line']}'")
+            
     next_song_dt["title"] = title
     next_song_dt["videoId"] = video_id
-
-    if verses:
+    
+    # Use first verse time if available
+    if verses and verses[0]['start_time'] >= 0:
         next_song_dt["timestamp"] = int(verses[0]['start_time'])
-    return {"selected_track": selected, "verse": verses}
+    else:
+        # Default start time if no time-synced lyrics
+        next_song_dt["timestamp"] = 20
 
-@app.get("/qr")
-def get_qr(
-    url: str = Query("https://unappendaged-aretha-unwaning.ngrok-free.dev/")
+    return {"selected_track": selected, "verse": verses, "source": lyrics_response.get("source", "Unknown")}
+
+@app.post("/radio/")
+async def start_radio_mode(
+    videoId: str = Form(...),
+    limit: int = Form(50)
 ):
     """
-    Returns the raw base64 encoded QR code string.
+    Start 'Smart Radio' mode using multithreading for maximum performance.
+    - Fetches Audio Playlist immediately (Thread 1)
+    - Resolves Video ID in background (Thread 2) -> Then Fetches Video Playlist (Thread 2)
     """
-    img_base64 = generate_qr_base64(url)
-    return img_base64
+    print(f"Starting Radio Mode for videoId: {videoId} (Async/Threaded)")
+    global out_tracks
+    
+    loop = asyncio.get_running_loop()
+
+    # --- BLOCKING HELPERS (Run in Threads) ---
+    def resolve_video_id(original_id):
+        """Checks if ID is Audio-only and searches for video version."""
+        try:
+            # Check metadata
+            metadata = yt.get_song(original_id)
+            video_details = metadata.get("videoDetails", {})
+            music_type = video_details.get("musicVideoType", "")
+            title = video_details.get("title", "")
+
+            if music_type == "MUSIC_VIDEO_TYPE_ATV":
+                print(f"Detected Audio-only Track ({original_id}). Searching for video version...")
+                search_query = f"{title} video song"
+                video_results = yt.search(search_query, filter="videos", limit=1)
+                if video_results:
+                    new_id = video_results[0].get("videoId")
+                    if new_id:
+                        print(f"Resolved Video Version: {new_id}")
+                        return new_id
+        except Exception as e:
+            print(f"Video Resolution failed: {e}")
+        return original_id # Fallback to original
+
+    def fetch_playlist_blocking(vid, lim):
+        return yt.get_watch_playlist(videoId=vid, limit=lim, radio=True)
+
+    def process_radio_tracks(raw_list, label_type="Radio"):
+        processed = []
+        for t in raw_list:
+            title = t.get("title", "")
+            artists = t.get("artists", [])
+            artist_name = artists[0]["name"] if artists else ""
+            vid = t.get("videoId", "")
+            thumbnails = t.get("thumbnail", [])
+            thumbnail_url = thumbnails[-1]["url"] if isinstance(thumbnails, list) and thumbnails else ""
+
+            if not vid: continue
+
+            processed.append({
+                "title": title,
+                "artist": artist_name,
+                "videoId": vid,
+                "music_url": f"https://music.youtube.com/watch?v={vid}",
+                "thumbnail": thumbnail_url,
+                "type": "radio",
+                "labels": [label_type],
+                "weight": 5
+            })
+        return processed
+    # -----------------------------------------
+
+    try:
+        # STEP 1: Start Audio Playlist Fetch (Immediate)
+        audio_task = loop.run_in_executor(None, fetch_playlist_blocking, videoId, limit)
+
+        # STEP 2: Start Video ID Resolution (Parallel)
+        resolution_task = loop.run_in_executor(None, resolve_video_id, videoId)
+
+        # Wait for Resolution
+        video_seed_id = await resolution_task
+        
+        # STEP 3: Start Video Playlist Fetch (After Resolution)
+        # Note: Audio fetch is still running in parallel!
+        video_task = loop.run_in_executor(None, fetch_playlist_blocking, video_seed_id, limit)
+
+        # STEP 4: Gather Results
+        # audio_task might be done or still running. video_task just started.
+        raw_audio, raw_video = await asyncio.gather(audio_task, video_task)
+        
+        # Process Results
+        audio_tracks = process_radio_tracks(raw_audio.get("tracks", []), "Radio Mix")
+        video_tracks = process_radio_tracks(raw_video.get("tracks", []), "Video Mix")
+
+        # Update Global
+        out_tracks = audio_tracks + video_tracks
+        for idx, t in enumerate(out_tracks):
+            t["index"] = idx
+
+        return {
+            "status": "success", 
+            "message": "Dual Radio Started", 
+            "tracks": audio_tracks, 
+            "videos": video_tracks
+        }
+
+    except Exception as e:
+        print(f"Error starting radio: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/charts/")
+def get_charts(country: str = Query("IN", min_length=2, max_length=2)):
+    """
+    Get top charts for a specific country (default: IN).
+    Returns 'top_songs', 'top_videos', 'trending' lists.
+    """
+    global out_tracks
+    try:
+        # charts = yt.get_charts(country=country) # DISABLED: Crashes often. using Recommender exclusively.
+        
+        # Use Async Recommender System exclusively
+        print(f"Fetching charts for {country} using AsyncIndianMusicRecommender...")
+        
+        top_songs = []
+        trending = []
+        top_videos = []
+
+        try:
+            # Generate Playlist from Recommender
+            dynamic_playlist = recommender.generate_dynamic_playlist(50)
+            
+            if dynamic_playlist:
+                formatted_items = []
+                for s in dynamic_playlist:
+                    # Map to frontend structure
+                    formatted_items.append({
+                        "title": s["title"],
+                        "artist": s["artist"],
+                        "videoId": s["videoId"],
+                        "browseId": "",
+                        "music_url": s["music_url"],
+                        "thumbnail": s["thumbnail"],
+                        "type": "chart",
+                        "labels": ["Trending", s.get("category", "")[:1].upper() + s.get("category", "")[1:]],
+                        "weight": 10
+                    })
+                
+                # Split for UI variety (Top Songs vs Trending)
+                top_songs = formatted_items[:25]
+                trending = formatted_items[25:]
+                
+                print(f"Recommender succeeded. {len(top_songs)} songs, {len(trending)} trending.")
+
+            else:
+                 raise Exception("Recommender database empty/building")
+
+        except Exception as e:
+            print(f"Recommender failed/not ready ({e}). Using Hardcoded Failsafe.")
+            
+            # Failsafe Hits
+            failsafe_tracks = [
+                {"videoId": "k4yXQkGDbLY", "title": "Shape of You", "artist": "Ed Sheeran", "thumbnail": "https://i.ytimg.com/vi/k4yXQkGDbLY/hqdefault.jpg"},
+                {"videoId": "JGwWNGJdvx8", "title": "Despacito", "artist": "Luis Fonsi", "thumbnail": "https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg"},
+                {"videoId": "OPf0YbXqDm0", "title": "Uptown Funk", "artist": "Mark Ronson", "thumbnail": "https://i.ytimg.com/vi/OPf0YbXqDm0/hqdefault.jpg"},
+                {"videoId": "09R8_2nJtjg", "title": "Sugar", "artist": "Maroon 5", "thumbnail": "https://i.ytimg.com/vi/09R8_2nJtjg/hqdefault.jpg"}
+            ]
+            
+            failsafe_processed = []
+            for t in failsafe_tracks:
+                 failsafe_processed.append({
+                    "title": t["title"], "artist": t["artist"], "videoId": t["videoId"],
+                    "browseId": "", "music_url": f"https://music.youtube.com/watch?v={t['videoId']}",
+                    "thumbnail": t["thumbnail"], "type": "chart", "labels": ["Hit"], "weight": 10
+                 })
+            
+            top_songs = failsafe_processed
+            trending = failsafe_processed
+        
+        return {
+            "country": country,
+            "top_songs": top_songs,
+            "top_videos": top_videos,
+            "trending": trending
+        }
+
+    except Exception as e:
+        print(f"Error fetching charts: {e}")
+        # Return empty structure instead of crashing
+        return {
+            "country": country,
+            "top_songs": [],
+            "top_videos": [],
+            "trending": []
+        }
