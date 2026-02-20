@@ -1,41 +1,59 @@
-# YTMusic -> Lyrics FastAPI
+# Premium Video DJ - Backend
 
+A powerful, modular FastAPI application that powers the **Premium Video DJ** experience. It provides real-time YouTube Music search, smart recommendations, automated radio playlists, and cross-device synchronization.
 
-Simple FastAPI app that returns YouTube Music recommendations and fetches lyrics via a RapidAPI Musixmatch wrapper.
+## 🚀 Key Features
 
-## Project Structure
-The backend has been refactored into a modular structure:
+- **Modular FastAPI Architecture**: Refactored into a clean, scalable structure (`api`, `core`, `services`, `utils`).
+- **Smart Search & Suggestions**: Real-time search suggestions and dual-category results (Official Songs & Videos).
+- **Refined Radio Mode**: Generates seamless playlists based on any track, optimized for "Official Music Video" content to ensure a premium visual experience.
+- **Dynamic Recommendations**: Custom Indian-music-focused recommender system that builds a data-driven background cache for faster discovery.
+- **WebSocket Sync Client**: Complete crossfade-ready synchronization. One device acts as the player, others as controllers (QR-code based pairing).
+- **Lyrics Integration**: Multi-source lyrics engine (YouTube Music + Musixmatch fallback via RapidAPI).
+- **Trending Charts**: Direct access to top charts and trending tracks (optimized for the IN region).
+
+## 📂 Project Structure
+
 - `app/`: Main application package
-  - `api/`: API endpoints and WebSocket routes
-  - `core/`: Configuration and state management
-  - `services/`: Business logic (Music service, Connection manager)
-  - `utils/`: Helper functions
-- `run.py`: Script to run the application locally
+  - `api/`: REST endpoints and WebSocket protocols (`DJSyncClient`).
+  - `core/`: Config management (Pydantic based) and global state.
+  - `services/`: Core logic (YTMusic integration, Radio engine, Recommender).
+  - `utils/`: Processing helpers and text parsers.
+- `templates/`: Jinja2 templates (including the unified `recommendations.html`).
+- `run.py`: Entry point for local development.
 
-## Deploy to Render
-1. Create a new Git repository and push these files.
-2. Sign in to Render and create a new **Web Service**.
-- Connect your GitHub repo
-- Runtime: Python 3 (Render auto-detects)
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT`
-3. Add environment variables in the Render Dashboard:
-- `RAPIDAPI_KEY` = your RapidAPI key
-- `RAPIDAPI_HOST` = `spotify-web-api3.p.rapidapi.com` (optional)
-4. Deploy — once running, visit `https://<your-service>.onrender.com/docs` for Swagger UI.
+## 🛠️ Local Development
 
+1. **Setup Environment**:
+   - Copy `.env.example` to `.env`
+   - Set `RAPIDAPI_KEY` for lyrics support.
 
-## Local development
-1. Copy `.env.example` to `.env` and fill values.
-2. Install deps: `pip install -r requirements.txt`
-3. Run locally:
+2. **Install Dependencies**:
    ```bash
-   python run.py
-   # OR
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   pip install -r requirements.txt
    ```
 
+3. **Run the Server**:
+   ```bash
+   python run.py
+   ```
+   *The server defaults to port `8045`.*
 
-## Notes
-- Keep `RAPIDAPI_KEY` secret. Do not commit it.
-- YTMusic first-run may download headers; allow few seconds.
+4. **Production / Docker**:
+   ```bash
+   uvicorn app.main:app --host 0.0.0.0 --port 8000
+   ```
+
+## ☁️ Deployment (Render)
+
+1. Connect your repository to **Render** as a **Web Service**.
+2. **Build Command**: `pip install -r requirements.txt`
+3. **Start Command**: `gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT`
+4. Add Environment Variables for `RAPIDAPI_KEY` and `RAPIDAPI_HOST`.
+
+## 📜 Notes
+
+- **Initial Load**: The first run might take a few seconds as it initializes headers and builds the recommendation database.
+- **WebSocket**: Controls are broadcasted globally to all connected clients under the same host for instant synchronization.
+- **Radio Mode**: Always prioritizes high-quality official music videos when available.
+
