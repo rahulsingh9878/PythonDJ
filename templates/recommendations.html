@@ -44,9 +44,8 @@
             width: 100%;
             max-width: 600px;
             margin: 0 auto;
-            min-height: 100vh;
             position: relative;
-            padding-bottom: 160px;
+            padding-bottom: 5px;
         }
 
         /* --- Header --- */
@@ -121,6 +120,9 @@
             transform: translateY(0);
             pointer-events: all;
             margin-bottom: 20px;
+            overflow: visible;
+            z-index: 1001;
+            /* Ensure above content */
         }
 
         .search-input {
@@ -133,6 +135,52 @@
             background: var(--bg-surface);
             color: #fff;
             outline: none;
+        }
+
+        /* Suggestions Dropdown */
+        .suggestions-box {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #1a1a1a;
+            border: 1px solid var(--border);
+            border-top: none;
+            border-bottom-left-radius: var(--radius-md);
+            border-bottom-right-radius: var(--radius-md);
+            max-height: 0;
+            overflow-y: auto;
+            z-index: 1005;
+            transition: max-height 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .suggestions-box.active {
+            max-height: 250px;
+            padding: 8px 0;
+            border-top: 1px solid var(--border);
+        }
+
+        .suggestion-item {
+            padding: 10px 18px;
+            font-size: 14px;
+            color: #ccc;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.15s;
+        }
+
+        .suggestion-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .suggestion-item svg {
+            color: var(--text-muted);
+            width: 16px;
+            height: 16px;
         }
 
         .search-actions {
@@ -165,7 +213,6 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 16px;
             padding: 0 4px;
         }
 
@@ -240,7 +287,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 0 16px 16px;
+            padding: 16px 16px;
             color: var(--text-muted);
             font-size: 13px;
         }
@@ -366,7 +413,7 @@
             left: 0;
             right: 0;
             background: #111;
-            padding: 16px;
+            padding: 3px 16px 9px;
             display: none;
             flex-direction: column;
             gap: 12px;
@@ -766,7 +813,7 @@
 
         <!-- Search -->
         <section class="search-section">
-            <form id="trackForm" action="/recommendations/" method="POST">
+            <form id="trackForm" action="/search/" method="POST">
                 <input type="radio" style="display: none;" id="nextPlay" name="nextPlay">
                 <input type="range" style="display: none;" id="maxVol" name="maxVol" min="0" max="100"
                     value="{{maxVol}}">
@@ -777,6 +824,7 @@
                 <div class="search-box" id="searchBox">
                     <input type="text" id="queryInput" name="query" class="search-input"
                         placeholder="Search song or artist..." value="{{ query }}" autocomplete="off">
+                    <div class="suggestions-box" id="suggestionsBox"></div>
                     <div class="search-actions">
                         <button type="button" class="clear-btn" id="clearBtn" onclick="clearSearch()"
                             style="display: none;">✕</button>
@@ -791,15 +839,15 @@
 
                 <div class="nav-row">
                     <div class="type-toggle-pill">
-                        <div class="type-option {% if music_type == 'songs' or not music_type %}active{% endif %}"
-                            onclick="setType('songs')" data-type="songs">
-                            <span>🎵</span>
-                            <span>Songs</span>
-                        </div>
-                        <div class="type-option {% if music_type == 'videos' %}active{% endif %}"
+                        <div class="type-option {% if music_type == 'videos' or not music_type %}active{% endif %}"
                             onclick="setType('videos')" data-type="videos">
                             <span>🎬</span>
                             <span>Videos</span>
+                        </div>
+                        <div class="type-option {% if music_type == 'songs' %}active{% endif %}"
+                            onclick="setType('songs')" data-type="songs">
+                            <span>🎵</span>
+                            <span>Songs</span>
                         </div>
                     </div>
                     <div style="display: flex; gap: 8px;">
@@ -816,6 +864,7 @@
                         </button>
                     </div>
                 </div>
+
             </form>
         </section>
 
@@ -828,30 +877,35 @@
 
         <!-- Tracks List -->
         <main class="tracks-list" id="tracksList">
-            <div id="songsContainer"
-                style="display: {% if music_type == 'songs' or not music_type %}block{% else %}none{% endif %};">
-                {% if song_tracks %}
-                {% for t in song_tracks %}
-                <div class="track-item" data-title="{{ t.title }}" data-videoid="{{ t.videoId }}"
-                    data-thumb="{{ t.thumbnail }}" data-artist="{{ t.artist }}">
-                    <div class="track-index">{{ loop.index }}</div>
-                    <div class="track-thumb-box">
-                        <img src="{{ t.thumbnail }}" alt="{{ t.title }}" class="track-thumbnail"
-                            onerror="handleImageError(this, '{{ t.videoId }}')">
+            {% macro render_track_item(t, index) %}
+            <div class="track-item" data-title="{{ t.title }}" data-videoid="{{ t.videoId }}"
+                data-thumb="{{ t.thumbnail }}" data-artist="{{ t.artist }}">
+                <div class="track-index">{{ index }}</div>
+                <div class="track-thumb-box">
+                    <img src="{{ t.thumbnail }}" alt="{{ t.title }}" class="track-thumbnail"
+                        onerror="handleImageError(this, '{{ t.videoId }}')">
+                </div>
+                <div class="track-info">
+                    <div class="track-title">{{ t.title }}</div>
+                    <div class="track-artist-row">
+                        <span>{{ t.artist }}</span>
+                        {% if t.labels %}
+                        {% for label in t.labels %}
+                        <span
+                            class="badge {% if label == 'Official' %}badge-official{% elif label == 'Remix' %}badge-remix{% elif label == 'Dance' %}badge-dance{% elif label == 'Slowed' %}badge-slowed{% endif %}">{{
+                            label }}</span>
+                        {% endfor %}
+                        {% endif %}
                     </div>
-                    <div class="track-info">
-                        <div class="track-title">{{ t.title }}</div>
-                        <div class="track-artist-row">
-                            <span>{{ t.artist }}</span>
-                            {% if t.labels %}
-                            {% for label in t.labels %}
-                            <span
-                                class="badge {% if label == 'Official' %}badge-official{% elif label == 'Remix' %}badge-remix{% elif label == 'Dance' %}badge-dance{% elif label == 'Slowed' %}badge-slowed{% endif %}">{{
-                                label }}</span>
-                            {% endfor %}
-                            {% endif %}
-                        </div>
-                    </div>
+                </div>
+                <div class="track-actions">
+                    <button class="radio-btn" onclick="event.stopPropagation(); startRadio('{{ t.videoId }}')"
+                        title="Start Radio">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path
+                                d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z" />
+                        </svg>
+                    </button>
                     <button class="menu-btn" onclick="event.stopPropagation()">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -859,6 +913,13 @@
                         </svg>
                     </button>
                 </div>
+            </div>
+            {% endmacro %}
+
+            <div id="songsContainer" style="display: {% if music_type == 'songs' %}block{% else %}none{% endif %};">
+                {% if song_tracks %}
+                {% for t in song_tracks %}
+                {{ render_track_item(t, loop.index) }}
                 {% endfor %}
                 {% else %}
                 <div class="empty-state" style="padding: 40px; text-align: center; color: var(--text-muted);">
@@ -867,36 +928,11 @@
                 {% endif %}
             </div>
 
-            <div id="videosContainer" style="display: {% if music_type == 'videos' %}block{% else %}none{% endif %};">
+            <div id="videosContainer"
+                style="display: {% if music_type == 'videos' or not music_type %}block{% else %}none{% endif %};">
                 {% if video_tracks %}
                 {% for t in video_tracks %}
-                <div class="track-item" data-title="{{ t.title }}" data-videoid="{{ t.videoId }}"
-                    data-thumb="{{ t.thumbnail }}" data-artist="{{ t.artist }}">
-                    <div class="track-index">{{ loop.index }}</div>
-                    <div class="track-thumb-box">
-                        <img src="{{ t.thumbnail }}" alt="{{ t.title }}" class="track-thumbnail"
-                            onerror="handleImageError(this, '{{ t.videoId }}')">
-                    </div>
-                    <div class="track-info">
-                        <div class="track-title">{{ t.title }}</div>
-                        <div class="track-artist-row">
-                            <span>{{ t.artist }}</span>
-                            {% if t.labels %}
-                            {% for label in t.labels %}
-                            <span
-                                class="badge {% if label == 'Official' %}badge-official{% elif label == 'Remix' %}badge-remix{% elif label == 'Dance' %}badge-dance{% endif %}">{{
-                                label }}</span>
-                            {% endfor %}
-                            {% endif %}
-                        </div>
-                    </div>
-                    <button class="menu-btn" onclick="event.stopPropagation()">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                            <path
-                                d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" />
-                        </svg>
-                    </button>
-                </div>
+                {{ render_track_item(t, loop.index) }}
                 {% endfor %}
                 {% else %}
                 <div class="empty-state" style="padding: 40px; text-align: center; color: var(--text-muted);">
@@ -993,55 +1029,51 @@
             <div class="qr-url" id="qrUrl"></div>
         </div>
     </div>
+    </div>
 
 
     <script>
-        // --- 1. Global Elements & Init ---
+        // --- Global DOM refs ---
         const queryInput = document.getElementById('queryInput');
-        const clearBtn = document.getElementById('clearBtn'); // Use clearBtn ID from HTML
+        const clearBtn = document.getElementById('clearBtn');
         const searchBox = document.getElementById('searchBox');
 
+        // --- Image error fallback ---
         function handleImageError(img, videoId) {
-            const fallbacks = [`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`, `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`];
-            let currentIdx = fallbacks.indexOf(img.src);
-            if (currentIdx < fallbacks.length - 1) img.src = fallbacks[currentIdx + 1];
+            const fallbacks = [
+                `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+                `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
+            ];
+            let idx = fallbacks.indexOf(img.src);
+            if (idx < fallbacks.length - 1) img.src = fallbacks[idx + 1];
             else img.onerror = null;
         }
 
-        // --- 2. Search Logic ---
+        // --- Clear button ---
         function toggleClearBtn() {
-            if (clearBtn && queryInput) {
+            if (clearBtn && queryInput)
                 clearBtn.style.display = queryInput.value.length > 0 ? 'block' : 'none';
-            }
         }
-
         if (queryInput && clearBtn) {
             queryInput.addEventListener('input', toggleClearBtn);
             clearBtn.addEventListener('click', () => { queryInput.value = ''; toggleClearBtn(); queryInput.focus(); });
             toggleClearBtn();
         }
 
+        // --- Search box auto-hide timer ---
         let searchHideTimer = null;
-
         function resetSearchTimer() {
             if (searchHideTimer) clearTimeout(searchHideTimer);
             searchHideTimer = setTimeout(() => {
                 if (document.activeElement !== queryInput && searchBox) {
                     searchBox.classList.remove('visible');
-                } else {
-                    // If still focused, try again in 3s, but only if visible
-                    if (searchBox && searchBox.classList.contains('visible')) {
-                        resetSearchTimer();
-                    }
+                } else if (searchBox && searchBox.classList.contains('visible')) {
+                    resetSearchTimer();
                 }
-            }, 5000); // 5s is better than 3s
+            }, 5000);
         }
-
         if (queryInput && searchBox) {
-            queryInput.addEventListener('input', () => {
-                toggleClearBtn();
-                resetSearchTimer();
-            });
+            queryInput.addEventListener('input', () => { toggleClearBtn(); resetSearchTimer(); });
             queryInput.addEventListener('focus', resetSearchTimer);
             searchBox.addEventListener('mousedown', resetSearchTimer);
             searchBox.addEventListener('touchstart', resetSearchTimer);
@@ -1049,6 +1081,9 @@
 
         function toggleSearch() {
             if (!searchBox) return;
+            if (!searchBox.classList.contains('visible')) {
+                if (queryInput) { queryInput.value = ''; toggleClearBtn(); }
+            }
             searchBox.classList.toggle('visible');
             if (searchBox.classList.contains('visible')) {
                 if (queryInput) queryInput.focus();
@@ -1057,65 +1092,74 @@
             }
         }
 
+        // ===================== Track Rendering =====================
+        const renderTrackItem = (t, i) => `
+            <div class="track-item" data-title="${t.title}" data-videoid="${t.videoId}" data-thumb="${t.thumbnail}" data-artist="${t.artist}">
+                <div class="track-index">${i}</div>
+                <div class="track-thumb-box">
+                    <img src="${t.thumbnail}" alt="${t.title}" class="track-thumbnail" onerror="handleImageError(this, '${t.videoId}')">
+                </div>
+                <div class="track-info">
+                    <div class="track-title">${t.title}</div>
+                    <div class="track-artist-row">
+                        <span>${t.artist}</span>
+                        ${(t.labels || []).map(l => `<span class="badge ${l === 'Official' ? 'badge-official' : l === 'Remix' ? 'badge-remix' : l === 'Dance' ? 'badge-dance' : l === 'Slowed' ? 'badge-slowed' : ''}">${l}</span>`).join('')}
+                    </div>
+                </div>
+                <div class="track-actions">
+                    <button class="radio-btn" onclick="event.stopPropagation(); startRadio('${t.videoId}')" title="Start Radio">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
+                    </button>
+                    <button class="menu-btn" onclick="event.stopPropagation()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z"/></svg>
+                    </button>
+                </div>
+            </div>`;
+
+        function updateContainers(videoList, songList, isCharts = false) {
+            const noVideo = isCharts ? '' : '<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-muted);"><p>No videos found</p></div>';
+            const noSong = isCharts ? '' : '<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-muted);"><p>No songs found</p></div>';
+            document.getElementById('videosContainer').innerHTML = videoList.length ? videoList.map((t, i) => renderTrackItem(t, i + 1)).join('') : noVideo;
+            document.getElementById('songsContainer').innerHTML = songList.length ? songList.map((t, i) => renderTrackItem(t, i + 1)).join('') : noSong;
+        }
+
+        // ===================== setType / Tab =====================
+        function setType(type) {
+            document.getElementById('musicTypeInput').value = type;
+            document.querySelectorAll('.type-option').forEach(opt => opt.classList.toggle('active', opt.dataset.type === type));
+            document.getElementById('videosContainer').style.display = type === 'videos' ? 'block' : 'none';
+            document.getElementById('songsContainer').style.display = type === 'songs' ? 'block' : 'none';
+            try { localStorage.setItem('preferredMusicType', type); } catch (e) { }
+            const count = document.getElementById(type + 'Container').querySelectorAll('.track-item').length;
+            document.querySelector('.results-meta span').textContent = `${count} results • ${count} results`;
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            try {
+                const saved = localStorage.getItem('preferredMusicType');
+                if (saved === 'videos' || saved === 'songs') setType(saved);
+            } catch (e) { }
+        });
+
+        // ===================== Search =====================
         async function submitSearch(e, isRefresh = false) {
             if (e) e.preventDefault();
             const form = document.getElementById('trackForm');
             const formData = new FormData(form);
-            if (isRefresh) {
-                formData.append('refresh', 'true');
-            }
+            if (isRefresh) formData.append('refresh', 'true');
             document.body.classList.add('searching');
-
             try {
-                const response = await fetch('/recommendations/', {
-                    method: 'POST',
-                    body: formData,
-                    headers: { 'Accept': 'application/json' }
-                });
-                if (!response.ok) throw new Error('Search failed');
-                const data = await response.json();
-
+                const res = await fetch('/search/', { method: 'POST', body: formData, headers: { 'Accept': 'application/json' } });
+                if (!res.ok) throw new Error('Search failed');
+                const data = await res.json();
                 if (data.query) queryInput.value = data.query;
-
-                const render = (t, i) => `
-                    <div class="track-item" data-title="${t.title}" data-videoid="${t.videoId}" data-thumb="${t.thumbnail}" data-artist="${t.artist}">
-                        <div class="track-index">${i}</div>
-                        <div class="track-thumb-box">
-                            <img src="${t.thumbnail}" alt="${t.title}" class="track-thumbnail" onerror="handleImageError(this, '${t.videoId}')">
-                        </div>
-                        <div class="track-info">
-                            <div class="track-title">${t.title}</div>
-                            <div class="track-artist-row">
-                                <span>${t.artist}</span>
-                                ${(t.labels || []).map(l => `<span class="badge ${l === 'Official' ? 'badge-official' : l === 'Remix' ? 'badge-remix' : l === 'Dance' ? 'badge-dance' : l === 'Slowed' ? 'badge-slowed' : ''}">${l}</span>`).join('')}
-                            </div>
-                        </div>
-                        <div class="track-actions">
-                             <button class="radio-btn" onclick="event.stopPropagation(); startRadio('${t.videoId}')" title="Start Radio">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
-                            </button>
-                            <button class="menu-btn" onclick="event.stopPropagation()">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" /></svg>
-                            </button>
-                        </div>
-                    </div>`;
-
-                const sCont = document.getElementById('songsContainer');
-                const vCont = document.getElementById('videosContainer');
-
-                sCont.innerHTML = data.song_tracks.length ? data.song_tracks.map((t, i) => render(t, i + 1)).join('') : '<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-muted);"><p>No songs found</p></div>';
-                vCont.innerHTML = data.video_tracks.length ? data.video_tracks.map((t, i) => render(t, i + 1)).join('') : '<div class="empty-state" style="padding:40px;text-align:center;color:var(--text-muted);"><p>No videos found</p></div>';
-
-                setType(data.music_type || 'songs');
+                updateContainers(data.video_tracks, data.song_tracks);
+                setType(data.music_type || 'videos');
                 sessionStorage.setItem('searchPerformed', 'true');
                 resetSearchTimer();
-
                 document.getElementById('nextPlay').checked = false;
-            } catch (err) {
-                console.error(err);
-            } finally {
-                document.body.classList.remove('searching');
-            }
+            } catch (err) { console.error(err); }
+            finally { document.body.classList.remove('searching'); }
         }
 
         document.getElementById('trackForm').addEventListener('submit', submitSearch);
@@ -1128,43 +1172,43 @@
             }
         });
 
-        function setType(type) {
-            document.getElementById('musicTypeInput').value = type;
-            document.querySelectorAll('.type-option').forEach(opt => {
-                const isActive = opt.dataset.type === type;
-                opt.classList.toggle('active', isActive);
-            });
-            document.getElementById('songsContainer').style.display = type === 'songs' ? 'block' : 'none';
-            document.getElementById('videosContainer').style.display = type === 'videos' ? 'block' : 'none';
-
-            // Save preference to localStorage
+        // ===================== Radio =====================
+        async function startRadio(videoId) {
+            document.body.classList.add('searching');
+            const formData = new FormData();
+            formData.append('videoId', videoId);
+            formData.append('limit', 50);
             try {
-                localStorage.setItem('preferredMusicType', type);
-            } catch (e) {
-                console.warn('Could not save tab preference:', e);
-            }
-
-            // Update stats
-            const count = document.getElementById(type + 'Container').querySelectorAll('.track-item').length;
-            document.querySelector('.results-meta span').textContent = `${count} results • ${count} results`;
+                const res = await fetch('/radio/', { method: 'POST', body: formData });
+                if (!res.ok) throw new Error('Radio start failed');
+                const data = await res.json();
+                updateContainers(data.video_tracks, data.song_tracks);
+                document.getElementById('songsContainer').style.display = 'block';
+                document.getElementById('videosContainer').style.display = 'block';
+                document.querySelector('.results-meta span').textContent = 'Radio Mix • Dual Playlist';
+                queryInput.value = '';
+            } catch (err) { console.error(err); alert('Failed to start radio mode'); }
+            finally { document.body.classList.remove('searching'); }
         }
 
-        // Restore last selected tab on page load
-        window.addEventListener('DOMContentLoaded', () => {
+        // ===================== Charts =====================
+        async function fetchCharts() {
+            document.body.classList.add('searching');
             try {
-                const savedType = localStorage.getItem('preferredMusicType');
-                if (savedType && (savedType === 'songs' || savedType === 'videos')) {
-                    setType(savedType);
-                }
-            } catch (e) {
-                console.warn('Could not restore tab preference:', e);
-            }
-        });
+                const res = await fetch('/charts/?country=IN');
+                if (!res.ok) throw new Error('Charts fetch failed');
+                const data = await res.json();
+                updateContainers(data.top_videos, data.top_songs, true);
+                document.getElementById('songsContainer').style.display = 'block';
+                document.getElementById('videosContainer').style.display = 'block';
+                document.querySelector('.results-meta span').textContent = 'Trending • Top 20';
+                setType('songs');
+                queryInput.value = '';
+            } catch (err) { console.error(err); alert('Failed to load charts'); }
+            finally { document.body.classList.remove('searching'); }
+        }
 
-
-
-
-        /* ===================== Unified Sync Client ===================== */
+        // ===================== Unified Sync Client =====================
         class DJSyncClient {
             constructor(role = 'controller') {
                 this.role = role;
@@ -1175,99 +1219,56 @@
                 this.pingInterval = null;
                 this.connect();
             }
-
             connect() {
                 const isLocal = !window.location.hostname ||
-                    window.location.hostname === "localhost" ||
-                    window.location.hostname === "127.0.0.1" ||
-                    window.location.hostname.startsWith("192.168.") ||
-                    window.location.hostname.startsWith("10.") ||
-                    window.location.hostname.startsWith("172.");
-
-                // Ngrok Base URL
-                const WBase = "wss://unappendaged-aretha-unwaning.ngrok-free.dev";
-
-                let url;
-                if (isLocal) {
-                    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-                    url = `${protocol}//${location.host}/ws/sync?role=${this.role}`;
-                } else {
-                    url = `${WBase}/ws/sync?role=${this.role}`;
-                }
-
+                    ['localhost', '127.0.0.1'].includes(window.location.hostname) ||
+                    window.location.hostname.startsWith('192.168.') ||
+                    window.location.hostname.startsWith('10.') ||
+                    window.location.hostname.startsWith('172.');
+                const WBase = 'wss://unappendaged-aretha-unwaning.ngrok-free.dev';
+                const url = isLocal
+                    ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/sync?role=${this.role}`
+                    : `${WBase}/ws/sync?role=${this.role}`;
                 console.log(`[Sync] Connecting to ${url}...`);
                 this.ws = new WebSocket(url);
-
                 this.ws.onopen = () => {
-                    console.log("[Sync] ✅ Connected");
+                    console.log('[Sync] ✅ Connected');
                     this.reconnectAttempts = 0;
                     this.startHeartbeat();
-                    // If we're a controller, the first thing we might want is current state
-                    // (But for now just being connected is enough)
                 };
-
                 this.ws.onmessage = (e) => {
-                    try {
-                        const msg = JSON.parse(e.data);
-                        this.handleMessage(msg);
-                    } catch (err) {
-                        console.error("[Sync] Message parse error:", err);
-                    }
+                    try { this.handleMessage(JSON.parse(e.data)); }
+                    catch (err) { console.error('[Sync] Parse error:', err); }
                 };
-
-                this.ws.onclose = () => {
-                    console.log("[Sync] 🔌 Disconnected");
-                    this.stopHeartbeat();
-                    this.retry();
-                };
-
-                this.ws.onerror = (err) => {
-                    console.error("[Sync] ❌ Error:", err);
-                };
+                this.ws.onclose = () => { console.log('[Sync] 🔌 Disconnected'); this.stopHeartbeat(); this.retry(); };
+                this.ws.onerror = (err) => { console.error('[Sync] ❌ Error:', err); };
             }
-
             startHeartbeat() {
                 this.pingInterval = setInterval(() => {
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.send('ping', { ts: Date.now() });
-                    }
+                    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.send('ping', { ts: Date.now() });
                 }, 10000);
             }
-
-            stopHeartbeat() {
-                if (this.pingInterval) clearInterval(this.pingInterval);
-            }
-
+            stopHeartbeat() { if (this.pingInterval) clearInterval(this.pingInterval); }
             retry() {
                 const delay = Math.min(this.baseDelay * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
                 console.log(`[Sync] Retrying in ${delay / 1000}s...`);
-                setTimeout(() => {
-                    this.reconnectAttempts++;
-                    this.connect();
-                }, delay);
+                setTimeout(() => { this.reconnectAttempts++; this.connect(); }, delay);
             }
-
             send(type, data) {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.ws.send(JSON.stringify({ type, data }));
-                } else {
-                    console.warn(`[Sync] Cannot send ${type}, socket not open`);
-                }
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type, data }));
+                else console.warn(`[Sync] Cannot send ${type}, socket not open`);
             }
-
             handleMessage(msg) {
                 const { type, data } = msg;
                 switch (type) {
-                    case 'pong':
-                        // Heartbeat reply
-                        break;
+                    case 'pong': break;
                     case 'play':
                         if (data.videoId) {
                             document.getElementById('miniPlayer').classList.add('active');
                             if (data.title) document.getElementById('nowPlayingTitle').textContent = data.title;
                             isPlaying = true;
-                            const path = document.getElementById('playPausePath');
-                            if (path) path.setAttribute('d', 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+                            const pp = document.getElementById('playPausePath');
+                            if (pp) pp.setAttribute('d', 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
                         }
                         break;
                     case 'vol':
@@ -1275,15 +1276,11 @@
                         if (!isNaN(v)) syncVolumeUI(v);
                         break;
                     case 'control':
-                        // If we just sent a command, ignore incoming state for 1.5s to avoid flickering
                         if (Date.now() - lastUserActionTime < 1500) return;
-
                         if (data.action === 'toggle' || data.action === 'stateChange') {
                             isPlaying = (data.state === 'playing');
-                            const path = document.getElementById('playPausePath');
-                            if (path) {
-                                path.setAttribute('d', isPlaying ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
-                            }
+                            const pp2 = document.getElementById('playPausePath');
+                            if (pp2) pp2.setAttribute('d', isPlaying ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
                         }
                         break;
                     case 'qr':
@@ -1293,13 +1290,55 @@
                             qrModal.classList.add('active');
                         }
                         break;
+                    case 'suggestions':
+                        renderSuggestions(data.suggestions);
+                        break;
                 }
             }
         }
 
-        // Initialize single sync client
+        // ===================== Suggestions =====================
+        const suggestionsBox = document.getElementById('suggestionsBox');
+        let debounceTimer;
+
+        queryInput.addEventListener('input', (e) => {
+            const val = e.target.value.trim();
+            if (val.length > 0) {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => syncClient.send('suggest', { query: val }), 1000);
+            } else {
+                suggestionsBox.classList.remove('active');
+            }
+        });
+        document.addEventListener('click', (e) => {
+            if (!queryInput.contains(e.target) && !suggestionsBox.contains(e.target))
+                suggestionsBox.classList.remove('active');
+        });
+        queryInput.addEventListener('focus', () => {
+            if (queryInput.value.trim().length > 0)
+                syncClient.send('suggest', { query: queryInput.value.trim() });
+        });
+
+        function renderSuggestions(list) {
+            if (!list || list.length === 0) { suggestionsBox.classList.remove('active'); return; }
+            suggestionsBox.innerHTML = list.map(s => `
+                <div class="suggestion-item" onclick="selectSuggestion('${s.replace(/'/g, "\\'")}')">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                    <span>${s}</span>
+                </div>`).join('');
+            suggestionsBox.classList.add('active');
+        }
+
+        function selectSuggestion(val) {
+            queryInput.value = val;
+            suggestionsBox.classList.remove('active');
+            submitSearch();
+        }
+
+        // Initialize sync client
         const syncClient = new DJSyncClient('controller');
-        /* ===================== UI Elements ===================== */
+
+        // ===================== UI Elements =====================
         const volSlider = document.getElementById('volumeSlider');
         const volProgress = document.getElementById('volProgress');
         const navVolSlider = document.getElementById('navVolSlider');
@@ -1310,130 +1349,15 @@
         let isPlaying = false;
         let lastUserActionTime = 0;
 
-        async function startRadio(videoId) {
-            document.body.classList.add('searching');
-            const formData = new FormData();
-            formData.append('videoId', videoId);
-            formData.append('limit', 50);
-
-            try {
-                const response = await fetch('/radio/', {
-                    method: 'POST',
-                    body: formData
-                });
-                if (!response.ok) throw new Error('Radio start failed');
-                const data = await response.json();
-
-                // Re-use the render logic
-                const render = (t, i) => `
-                    <div class="track-item" data-title="${t.title}" data-videoid="${t.videoId}" data-thumb="${t.thumbnail}" data-artist="${t.artist}">
-                        <div class="track-index">${i}</div>
-                        <div class="track-thumb-box">
-                            <img src="${t.thumbnail}" alt="${t.title}" class="track-thumbnail" onerror="handleImageError(this, '${t.videoId}')">
-                        </div>
-                        <div class="track-info">
-                            <div class="track-title">${t.title}</div>
-                            <div class="track-artist-row">
-                                <span>${t.artist}</span>
-                                ${(t.labels || []).map(l => `<span class="badge ${l === 'Official' ? 'badge-official' : l === 'Remix' ? 'badge-remix' : l === 'Dance' ? 'badge-dance' : l === 'Slowed' ? 'badge-slowed' : l === 'Top Song' ? 'badge-official' : l === 'Trending' ? 'badge-dance' : ''}">${l}</span>`).join('')}
-                            </div>
-                        </div>
-                         <div class="track-actions">
-                             <button class="radio-btn" onclick="event.stopPropagation(); startRadio('${t.videoId}')" title="Start Radio">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
-                            </button>
-                            <button class="menu-btn" onclick="event.stopPropagation()">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" /></svg>
-                            </button>
-                        </div>
-                    </div>`;
-
-                const sCont = document.getElementById('songsContainer');
-                const vCont = document.getElementById('videosContainer');
-
-                // Populate both containers
-                sCont.innerHTML = (data.tracks || []).map((t, i) => render(t, i + 1)).join('');
-                vCont.innerHTML = (data.videos || []).map((t, i) => render(t, i + 1)).join('');
-
-                // Show both
-                document.getElementById('songsContainer').style.display = 'block';
-                document.getElementById('videosContainer').style.display = 'block';
-                document.querySelector('.results-meta span').textContent = `Radio Mix • Dual Playlist`;
-
-                // Update type toggle if needed, or leave it to show generic view
-                queryInput.value = "";
-
-            } catch (err) {
-                console.error(err);
-                alert("Failed to start radio mode");
-            } finally {
-                document.body.classList.remove('searching');
-            }
-        }
-
-        async function fetchCharts() {
-            document.body.classList.add('searching');
-            try {
-                const response = await fetch('/charts/?country=IN');
-                if (!response.ok) throw new Error('Charts fetch failed');
-                const data = await response.json();
-
-                // Re-use the render logic
-                const render = (t, i) => `
-                    <div class="track-item" data-title="${t.title}" data-videoid="${t.videoId}" data-thumb="${t.thumbnail}" data-artist="${t.artist}">
-                        <div class="track-index">${i}</div>
-                        <div class="track-thumb-box">
-                            <img src="${t.thumbnail}" alt="${t.title}" class="track-thumbnail" onerror="handleImageError(this, '${t.videoId}')">
-                        </div>
-                        <div class="track-info">
-                            <div class="track-title">${t.title}</div>
-                            <div class="track-artist-row">
-                                <span>${t.artist}</span>
-                                ${(t.labels || []).map(l => `<span class="badge ${l === 'Official' ? 'badge-official' : l === 'Top Song' ? 'badge-official' : l === 'Trending' ? 'badge-dance' : 'badge-remix'}">${l}</span>`).join('')}
-                            </div>
-                        </div>
-                         <div class="track-actions">
-                             <button class="radio-btn" onclick="event.stopPropagation(); startRadio('${t.videoId}')" title="Start Radio">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 6H8.3l8.26-3.82a1 1 0 0 0-1.25-1.07l-9 4.14A2 2 0 0 0 5 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-3.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm-9 0a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/></svg>
-                            </button>
-                            <button class="menu-btn" onclick="event.stopPropagation()">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm0-6c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z" /></svg>
-                            </button>
-                        </div>
-                    </div>`;
-
-                const sCont = document.getElementById('songsContainer');
-                const vCont = document.getElementById('videosContainer');
-
-                // Top Songs -> Left Column
-                sCont.innerHTML = data.top_songs.length ? data.top_songs.map((t, i) => render(t, i + 1)).join('') : '';
-
-                // Top Videos -> Right Column (or we can put Trending here)
-                vCont.innerHTML = data.top_videos.length ? data.top_videos.map((t, i) => render(t, i + 1)).join('') : '';
-
-                document.getElementById('musicTypeInput').value = 'songs';
-                document.getElementById('songsContainer').style.display = 'block';
-                document.getElementById('videosContainer').style.display = 'block';
-                document.querySelector('.results-meta span').textContent = `Trending • Top 20`;
-
-                queryInput.value = ""; // clear query because it's charts
-
-            } catch (err) {
-                console.error(err);
-                alert("Failed to load charts");
-            } finally {
-                document.body.classList.remove('searching');
-            }
-        }
-
+        // ===================== QR =====================
         function toggleQR(e) {
             e.stopPropagation();
             if (qrModal.classList.contains('active')) return hideQR();
             syncClient.send('qr', { url: window.location.origin });
         }
-
         function hideQR() { qrModal.classList.remove('active'); }
 
+        // ===================== Player Controls =====================
         function sendPlayerControl(action) {
             lastUserActionTime = Date.now();
             if (action === 'next' || action === 'prev') {
@@ -1441,30 +1365,18 @@
                 if (results.length > 0) {
                     const currentTitle = document.getElementById('nowPlayingTitle').textContent;
                     const currentIndex = results.findIndex(item => item.dataset.title === currentTitle);
-                    let targetIndex = -1;
-
-                    if (action === 'next') {
-                        targetIndex = (currentIndex + 1) % results.length;
-                    } else {
-                        targetIndex = (currentIndex - 1 + results.length) % results.length;
-                    }
-
-                    if (targetIndex !== -1) {
-                        const nextItem = results[targetIndex];
-                        playTrackFromItem(nextItem);
-                        return; // Done
-                    }
+                    const targetIndex = action === 'next'
+                        ? (currentIndex + 1) % results.length
+                        : (currentIndex - 1 + results.length) % results.length;
+                    playTrackFromItem(results[targetIndex]);
+                    return;
                 }
             }
-
-            let msgData = { action: action, timestamp: Date.now() };
+            let msgData = { action, timestamp: Date.now() };
             if (action === 'toggle') {
-                // Optimistic UI update
                 isPlaying = !isPlaying;
-                const path = document.getElementById('playPausePath');
-                if (path) {
-                    path.setAttribute('d', isPlaying ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
-                }
+                const pp = document.getElementById('playPausePath');
+                if (pp) pp.setAttribute('d', isPlaying ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
                 msgData.state = isPlaying ? 'playing' : 'paused';
             }
             syncClient.send('control', msgData);
@@ -1475,20 +1387,13 @@
             const title = item.dataset.title;
             const vid = item.dataset.videoid;
             const artist = item.dataset.artist;
-
-            const miniPlayer = document.getElementById('miniPlayer');
-            miniPlayer.classList.add('active');
+            document.getElementById('miniPlayer').classList.add('active');
             document.getElementById('nowPlayingTitle').textContent = title;
             document.getElementById('nowPlayingArtist').textContent = artist;
-
-            // Update icon optimistically
             isPlaying = true;
-            const path = document.getElementById('playPausePath');
-            if (path) path.setAttribute('d', 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
-
-            // Send immediate WebSocket play command (Faster than HTTP)
-            syncClient.send('play', { videoId: vid, title: title, timestamp: 0 });
-
+            const pp = document.getElementById('playPausePath');
+            if (pp) pp.setAttribute('d', 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+            syncClient.send('play', { videoId: vid, title, timestamp: 0 });
             document.getElementById('queryInput').value = title;
             document.getElementById('videoIdInput').value = vid;
             document.getElementById('nextPlay').checked = true;
@@ -1499,11 +1404,12 @@
 
         document.getElementById('tracksList').addEventListener('click', (e) => {
             const item = e.target.closest('.track-item');
-            if (item && !e.target.closest('.menu-btn')) {
+            if (item && !e.target.closest('.menu-btn') && !e.target.closest('.radio-btn')) {
                 playTrackFromItem(item);
             }
         });
 
+        // ===================== Volume =====================
         function syncVolumeUI(v) {
             if (volSlider) volSlider.value = v;
             if (volProgress) volProgress.style.width = v + '%';
@@ -1519,20 +1425,12 @@
             syncClient.send('vol', { volume: vol });
         }
 
-        // Horizontal Volume Slider Listener
-        if (volSlider) {
-            volSlider.addEventListener('input', (e) => {
-                updateAllVolume(e.target.value);
-            });
-        }
-
+        if (volSlider) volSlider.addEventListener('input', (e) => updateAllVolume(e.target.value));
 
         let volumeHideTimer = null;
         function resetVolumeTimer() {
             if (volumeHideTimer) clearTimeout(volumeHideTimer);
-            volumeHideTimer = setTimeout(() => {
-                document.getElementById('navVolumePopover').classList.remove('active');
-            }, 3000);
+            volumeHideTimer = setTimeout(() => document.getElementById('navVolumePopover').classList.remove('active'), 3000);
         }
 
         if (navVolSlider) {
@@ -1545,36 +1443,22 @@
                 resetVolumeTimer();
                 e.preventDefault();
             }
-
-            // Using the hidden input for native accessibility, but overlaying better events
             const hInput = document.getElementById('navVolSlider');
             hInput.addEventListener('mousedown', (e) => {
                 handleVertSlide(e);
                 const move = (me) => handleVertSlide(me);
-                const up = () => {
-                    document.removeEventListener('mousemove', move);
-                    document.removeEventListener('mouseup', up);
-                };
+                const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); };
                 document.addEventListener('mousemove', move);
                 document.addEventListener('mouseup', up);
             });
-
             hInput.addEventListener('touchstart', (e) => {
                 handleVertSlide(e);
                 const tmove = (te) => handleVertSlide(te);
-                const tend = () => {
-                    document.removeEventListener('touchmove', tmove);
-                    document.removeEventListener('touchend', tend);
-                };
+                const tend = () => { document.removeEventListener('touchmove', tmove); document.removeEventListener('touchend', tend); };
                 document.addEventListener('touchmove', tmove, { passive: false });
                 document.addEventListener('touchend', tend);
             }, { passive: false });
-
-            // Sync the input value for form submission
-            hInput.addEventListener('input', (e) => {
-                updateAllVolume(e.target.value);
-                resetVolumeTimer();
-            });
+            hInput.addEventListener('input', (e) => { updateAllVolume(e.target.value); resetVolumeTimer(); });
         }
 
         function toggleVolumePopover(e) {
@@ -1588,7 +1472,7 @@
             if (volumeHideTimer) clearTimeout(volumeHideTimer);
         });
 
-
+        // ===================== Sort =====================
         let currentSort = 'official';
         function cycleSort() {
             const modes = ['official', 'remix', 'lyrical', 'slowed', 'relevance'];
@@ -1598,8 +1482,7 @@
         }
 
         function sortResults(criteria) {
-            const containers = ['songsContainer', 'videosContainer'];
-            containers.forEach(id => {
+            ['songsContainer', 'videosContainer'].forEach(id => {
                 const container = document.getElementById(id);
                 if (!container) return;
                 const items = Array.from(container.querySelectorAll('.track-item'));
@@ -1618,6 +1501,7 @@
 
         window.addEventListener('load', () => { if (!queryInput.value) queryInput.focus(); });
     </script>
+
 </body>
 
 </html>
