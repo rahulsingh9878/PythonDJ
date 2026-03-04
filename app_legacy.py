@@ -207,7 +207,7 @@ async def index_webview(request: Request):
     default_context["request"] = request
     if "music_type" not in default_context:
         default_context["music_type"] = "songs"
-    return templates.TemplateResponse("recommendations.html", default_context)
+    return templates.TemplateResponse("index.html", default_context)
     
 
 @app.post("/recommendations/")
@@ -258,7 +258,7 @@ async def get_recommendations_as_webview(request: Request,
             cached_context = RESULT_CACHE[cache_key]
             if request.headers.get("Accept") == "application/json":
                 return JSONResponse(content=cached_context)
-            return templates.TemplateResponse("recommendations.html", {**cached_context, "request": request})
+            return templates.TemplateResponse("index.html", {**cached_context, "request": request})
 
         def process_results(results, result_type, filter_title=None):
             """Optimized result processing with label detection and high-res thumbnails"""
@@ -529,7 +529,7 @@ async def get_recommendations_as_webview(request: Request,
             return JSONResponse(content=context)
 
         context["request"] = request
-        return templates.TemplateResponse("recommendations.html", context)
+        return templates.TemplateResponse("index.html", context)
 
     except requests.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {e}")

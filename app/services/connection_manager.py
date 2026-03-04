@@ -31,8 +31,7 @@ class DJConnectionManager:
 
     async def broadcast(self, message: dict, sender: WebSocket = None, target_role: str = None):
         """
-        Broadcasts a message.
-        target_role: "player", "controller", or None (all)
+        Broadcasts a message to a specific role or everyone.
         """
         targets = self.all_connections
         if target_role == "player":
@@ -48,4 +47,22 @@ class DJConnectionManager:
             except Exception:
                 self.disconnect(connection)
 
+class PlayerBroadcaster:
+    """Explicit broadcaster for the main Player App (Display)"""
+    def __init__(self, manager: DJConnectionManager):
+        self.manager = manager
+
+    async def send(self, msg_type: str, data: dict, sender: WebSocket = None):
+        await self.manager.broadcast({"type": msg_type, "data": data}, sender=sender, target_role="player")
+
+class WebAppBroadcaster:
+    """Explicit broadcaster for the WebApp Controllers (Remotes)"""
+    def __init__(self, manager: DJConnectionManager):
+        self.manager = manager
+
+    async def send(self, msg_type: str, data: dict, sender: WebSocket = None):
+        await self.manager.broadcast({"type": msg_type, "data": data}, sender=sender, target_role="controller")
+
 manager = DJConnectionManager()
+player_broadcaster = PlayerBroadcaster(manager)
+webapp_broadcaster = WebAppBroadcaster(manager)

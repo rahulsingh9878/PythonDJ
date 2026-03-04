@@ -186,17 +186,17 @@ class MusicService:
         1. Instantly broadcast play command.
         2. Use radio logic (related tracks) to populate the background list.
         """
-        from ..services.connection_manager import manager
+        from ..services.connection_manager import player_broadcaster, webapp_broadcaster
         from ..core import state
         import copy
 
-        # 1. Immediate Broadcast (Fast Lane)
+        # 1. Immediate Broadcast (Fast Lane) to Player Only
         play_data = {
             "videoId": video_id,
             "title": title,
             "timestamp": 20
         }
-        await manager.broadcast({"type": "play", "data": play_data})
+        await player_broadcaster.send("play", play_data)
 
         # 2. Use Radio Logic to fetch new list
         radio_result = await self.start_radio(video_id=video_id, limit=limit)
@@ -353,7 +353,6 @@ class MusicService:
                     res["video"] = video_results[0].get("videoId") or original_id
                 if audio_results:
                     res["audio"] = audio_results[0].get("videoId") or original_id
-                print(res)
             except: pass
             return res
 
@@ -434,8 +433,7 @@ class MusicService:
             "maxVol": current_max_vol,
             "status": "success"
         }
-
-        print(final_list)
+        
         # Sync Global Context (so all controllers see the new list)
         import copy
         state.default_context.clear()

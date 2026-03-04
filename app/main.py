@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from .api import endpoints, websocket_routes
 from .core.config import ORIGINS
 
@@ -15,6 +16,9 @@ app.add_middleware(
 
 app.include_router(endpoints.router)
 app.include_router(websocket_routes.router)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 
 if __name__ == "__main__":
     import uvicorn

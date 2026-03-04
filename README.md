@@ -19,7 +19,7 @@ A powerful, modular FastAPI application that powers the **Premium Video DJ** exp
   - `core/`: Config management (Pydantic based) and global state.
   - `services/`: Core logic (YTMusic integration, Radio engine, Recommender).
   - `utils/`: Processing helpers and text parsers.
-- `templates/`: Jinja2 templates (including the unified `recommendations.html`).
+- `templates/`: Jinja2 templates (including the unified `index.html`).
 - `run.py`: Entry point for local development.
 
 ## 🛠️ Local Development

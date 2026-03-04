@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from ..services.music_service import music_service
 from ..services.connection_manager import manager
 from ..core.state import out_tracks, default_context, next_song_dt, RESULT_CACHE
-from ..utils.helpers import find_video_id, detect_verses
+from ..utils.helpers import find_video_id, detect_verses, generate_qr_base64
 from ..core.config import RAPIDAPI_KEY, RAPIDAPI_HOST, RAPIDAPI_URL
 
 router = APIRouter()
@@ -21,6 +21,8 @@ templates = Jinja2Templates(directory="templates")
 @router.on_event("startup")
 async def startup_event():
     """Start building the music database in the background on app startup."""
+    from ..core import state
+    state.server_start_time = time.time()
     await music_service.initialize()
 
 @router.get("/", response_class=HTMLResponse)
@@ -28,7 +30,7 @@ async def index_webview(request: Request):
     default_context["request"] = request
     if "music_type" not in default_context:
         default_context["music_type"] = "songs"
-    return templates.TemplateResponse("recommendations.html", default_context)
+    return templates.TemplateResponse("index.html", default_context)
 
 @router.post("/search/")
 async def search_endpoint(
@@ -73,7 +75,7 @@ async def search_endpoint(
 
 
         context["request"] = request
-        return templates.TemplateResponse("recommendations.html", context)
+        return templates.TemplateResponse("index.html", context)
 
     except Exception as e:
         import traceback
@@ -219,6 +221,7 @@ async def start_radio_mode(
         print(f"Error starting radio: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/charts/")
 def get_charts(country: str = Query("IN", min_length=2, max_length=2)):
     print(f"Fetching charts for {country} using AsyncIndianMusicRecommender...")
@@ -276,3 +279,16 @@ def get_charts(country: str = Query("IN", min_length=2, max_length=2)):
         "top_videos": top_videos,
         "trending": trending
     }
+@router.get("/qr/")
+async def get_qr_code(request: Request):
+    """
+    Returns a BASE64 encoded QR code for the pairing URL.
+    The URL points to the current host so people can scan it to become controllers.
+    """
+    # Prefer ngrok URL if available in headers or just use current host
+    host = request.headers.get("x-forwarded-host", request.base_url.netloc)
+    scheme = request.headers.get("x-forwarded-proto", "http")
+    pairing_url = f"{scheme}://{host}/"
+    
+    img_base64 = generate_qr_base64(pairing_url)
+    return JSONResponse(content=img_base64)
