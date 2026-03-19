@@ -238,18 +238,21 @@ class DJSyncClient {
                     // Trigger next automatically if < 22s left
                     if (duration > 0 && data.state === 1) { // 1 = Playing
                         const remaining = duration - currentTime;
-                        if (remaining < 100 && remaining > 5) {
-                            console.log(`[AutoAdvance] ⏭ Only ${remaining}s left, auto-advancing...`);
-                            sendPlayerControl('next');
+                        console.log(`[AutoAdvance] ⏭ Only ${remaining}s left, auto-advancing...`);
+                        if (remaining < 50 && remaining > 5) {
+                            console.log(`[AutoAdvance Pressed] ⏭ Only ${remaining}s left, auto-advancing...`);
+                            sendPlayerControl('next', 5);
                         }
                     }
                 }
                 break;
             case 'play':
-                if (data.videoId) {
+                console.log(`[Sync] Play - Video: ${data.videoId}`);
+                if (data.videoid) {
                     const mp = document.getElementById('miniPlayer');
                     if (mp) mp.classList.add('active');
                     if (data.title) document.getElementById('nowPlayingTitle').textContent = data.title;
+                    if (data.videoid) document.getElementById('nowPlayingVideoID').textContent = data.videoid;
                     isPlaying = true;
                     hasTriggeredAutoNext = false; // Reset skip flag for new song
                     const pp = document.getElementById('playPausePath');
@@ -375,14 +378,14 @@ function toggleQR(e) {
 function hideQR() { if (qrModal) qrModal.classList.remove('active'); }
 
 // ===================== Player Controls =====================
-function sendPlayerControl(action) {
+function sendPlayerControl(action, delay = 1) {
     if (action === 'next' || action === 'prev') {
         const results = Array.from(document.querySelectorAll('.track-item'));
         if (results.length > 0) {
-            const currentTitle = document.getElementById('nowPlayingTitle').textContent;
-            const currentIndex = results.findIndex(item => item.dataset.title === currentTitle);
+            const currentVideoID = document.getElementById('nowPlayingVideoID').textContent;
+            const currentIndex = results.findIndex(item => item.dataset.videoid === currentVideoID);
             const targetIndex = action === 'next'
-                ? (currentIndex + 1) % results.length
+                ? (currentIndex + delay) % results.length
                 : (currentIndex - 1 + results.length) % results.length;
             playTrackFromItem(results[targetIndex]);
             return;
@@ -399,12 +402,14 @@ function sendPlayerControl(action) {
 }
 
 function playTrackFromItem(item) {
+    console.log(`[PlayTrack] Playing ${item.dataset}...`);
     const title = item.dataset.title;
     const vid = item.dataset.videoid;
     const artist = item.dataset.artist;
     const mp = document.getElementById('miniPlayer');
     if (mp) mp.classList.add('active');
     document.getElementById('nowPlayingTitle').textContent = title;
+    document.getElementById('nowPlayingVideoID').textContent = vid;
     document.getElementById('nowPlayingArtist').textContent = artist;
     isPlaying = true;
     const pp = document.getElementById('playPausePath');
