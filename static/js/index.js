@@ -6,6 +6,7 @@ const searchBox = document.getElementById('searchBox');
 // --- Global state variables ---
 let isPlaying = false;
 let isMuted = (typeof CONFIG !== 'undefined' ? CONFIG.isMuted : false);
+let djMode = localStorage.getItem('djMode') !== 'false'; // on by default
 
 // --- Sync Tracking ---
 // --- Sync Tracking ---
@@ -22,6 +23,21 @@ function handleImageError(img, videoId) {
     if (idx < fallbacks.length - 1) img.src = fallbacks[idx + 1];
     else img.onerror = null;
 }
+
+// --- DJ Mode ---
+function toggleDJMode() {
+    djMode = !djMode;
+    localStorage.setItem('djMode', djMode);
+    const btn = document.getElementById('djToggleBtn');
+    if (btn) btn.classList.toggle('active', djMode);
+}
+
+function initDJToggle() {
+    const btn = document.getElementById('djToggleBtn');
+    if (btn) btn.classList.toggle('active', djMode);
+}
+
+window.addEventListener('DOMContentLoaded', initDJToggle);
 
 // --- Clear button ---
 function toggleClearBtn() {
@@ -117,6 +133,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (saved === 'videos' || saved === 'songs') setType(saved);
     } catch (e) { }
 });
+
 
 // ===================== Search =====================
 async function submitSearch(e, isRefresh = false) {
@@ -426,7 +443,8 @@ function playTrackFromItem(item) {
         maxVol: parseInt(val),
         music_type: document.getElementById('musicTypeInput').value || 'videos',
         nextPlay: true,
-        refresh: false
+        refresh: false,
+        dj_mode: djMode
     });
 
     if (queryInput) queryInput.value = title;

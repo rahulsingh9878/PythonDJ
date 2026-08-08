@@ -1,25 +1,79 @@
+"""
+Application factory for the Premium Video DJ backend.
+
+The `create_app()` factory wires together:
+  - CORS middleware
+  - API routers (HTTP + WebSocket)
+  - Static-file mounting
+  - Startup / shutdown lifecycle via the `lifespan` context manager
+
+The module-level `app` object is what Uvicorn / Gunicorn import:
+
+    uvicorn app.main:app
+    gunicorn -k uvicorn.workers.UvicornWorker app.main:app
+"""
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+
 from .api import endpoints, websocket_routes
-from .core.config import ORIGINS
-
-app = FastAPI(title="YTMusic -> Lyrics FastAPI", version="2.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(endpoints.router)
-app.include_router(websocket_routes.router)
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
+from .core.config import settings
+from .core.logging import setup_logging
+from .services.music_service import music_service
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Replaces the deprecated @app.on_event("startup") / ("shutdown") pattern.
+
+    Everything *before* `yield` runs at startup; everything *after* runs at
+    shutdown.
+    """
+    # --- Startup ---
+    setup_logging(settings.log_level)
+    await music_service.initialize()
+    yield
+    # --- Shutdown (add cleanup here if needed in the future) ---
+
+
+def create_app() -> FastAPI:
+    """Construct and return the configured FastAPI application."""
+    app = FastAPI(
+        title=settings.app_title,
+        version=settings.app_version,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        lifespan=lifespan,
+    )
+
+    # ------------------------------------------------------------------
+    # Middleware
+    # ------------------------------------------------------------------
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # ------------------------------------------------------------------
+    # Routers
+    # ------------------------------------------------------------------
+    app.include_router(endpoints.router, tags=["Music API"])
+    app.include_router(websocket_routes.router, tags=["WebSocket"])
+
+    # ------------------------------------------------------------------
+    # Static files
+    # ------------------------------------------------------------------
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+    return app
+
+
+# Module-level instance consumed by the ASGI server
+app = create_app()

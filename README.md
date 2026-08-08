@@ -1,18 +1,20 @@
 # Premium Video DJ — Backend
 
-A real-time music DJ platform built with **FastAPI**. Search YouTube Music, generate smart radio playlists, sync multiple devices over WebSockets, and fetch lyrics — all optimized for Indian music discovery.
+A real-time music DJ platform built with **FastAPI**. Search YouTube Music, generate smart radio playlists, sync multiple devices over WebSockets, and fetch lyrics — all optimised for Indian music discovery.
 
 ---
 
-## Features
+## What's inside
 
-- **Dual-Category Search** — Searches songs and videos in parallel, ranks results by label (Official, Remix, Live, Cover, Slowed)
-- **Radio Mode** — Seeds a playlist from any track using both its audio and video IDs, fetching related tracks in parallel
-- **Indian Music Recommender** — Pre-built background playlist generator (Bollywood, Punjabi, Haryanvi, Indie/Regional)
-- **Cross-Device Sync** — WebSocket-based sync between a player device and one or more controller devices; pair via QR code
-- **Lyrics Engine** — Fetches lyrics from YouTube Music first, falls back to Musixmatch via RapidAPI
-- **Search Suggestions** — Live autocomplete as you type
-- **Trending Charts** — Pulls region-specific (IN) trending tracks on demand
+| Layer | Responsibility |
+|---|---|
+| `app/core/` | Config (Pydantic Settings), centralised logging, shared application state |
+| `app/models/` | Pydantic request + response schemas for type-safe, self-documenting APIs |
+| `app/api/` | HTTP endpoints, WebSocket hub, FastAPI dependency providers |
+| `app/services/` | Business logic — music search/radio/lyrics, WebSocket connection pool, Indian music recommender |
+| `app/utils/` | Pure utility functions (LRC parser, QR generator) |
+| `templates/` | Jinja2 player UI |
+| `static/` | JS sync client + CSS |
 
 ---
 
@@ -21,126 +23,195 @@ A real-time music DJ platform built with **FastAPI**. Search YouTube Music, gene
 ```
 .
 ├── app/
-│   ├── main.py                     # FastAPI app setup, middleware, router registration
+│   ├── main.py                     # App factory + lifespan (startup / shutdown)
 │   ├── api/
+│   │   ├── deps.py                 # FastAPI Depends() providers
 │   │   ├── endpoints.py            # HTTP REST endpoints
-│   │   └── websocket_routes.py     # WebSocket handlers (sync, play, radio, volume, QR)
+│   │   └── websocket_routes.py     # WebSocket hub + dedicated routes
 │   ├── core/
-│   │   ├── config.py               # Environment config (API keys, CORS origins)
-│   │   └── state.py                # Global in-memory state (queue, cache, player context)
+│   │   ├── config.py               # Pydantic BaseSettings (reads .env)
+│   │   ├── logging.py              # Centralised logging setup
+│   │   └── state.py                # AppState dataclass – single source of truth
+│   ├── models/
+│   │   ├── requests.py             # Validated request schemas
+│   │   └── responses.py            # Typed response schemas
 │   ├── services/
-│   │   ├── music_service.py        # Search, radio, lyrics logic via ytmusicapi
-│   │   ├── connection_manager.py   # WebSocket connection pool (player vs controller roles)
+│   │   ├── music_service.py        # Search, radio, lyrics — single YTMusic session
+│   │   ├── connection_manager.py   # WebSocket pool (player / controller roles)
 │   │   └── recommender_system.py   # Async Indian music playlist builder
 │   └── utils/
-│       └── helpers.py              # LRC timestamp parser, QR code generator
+│       └── helpers.py              # LRC parser, QR generator
 ├── templates/
 │   └── index.html                  # Jinja2 music player UI
 ├── static/
-│   ├── js/index.js                 # Frontend WebSocket sync client (DJSyncClient)
-│   └── css/index.css               # Styles
+│   ├── js/index.js                 # DJSyncClient (WebSocket sync)
+│   └── css/index.css
+├── .env.example                    # Environment variable template
 ├── run.py                          # Local dev entry point
 ├── render.yaml                     # Render.com deployment config
-└── requirements.txt
+└── requirements.txt                # Pinned dependencies
 ```
 
 ---
 
-## API Endpoints
+## Quick Start
 
-### HTTP
+**1. Copy the environment template**
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| GET | `/` | Serve the Jinja2 player UI |
-| POST | `/search/` | Search YouTube Music (songs + videos, parallel) |
-| GET | `/suggestions/` | Live search autocomplete |
-| GET | `/lyrics/` | Fetch lyrics (YTMusic → RapidAPI fallback) |
-| GET | `/track/{idx}/` | Get lyrics for a queued track by index |
-| POST | `/radio/` | Start radio from a track (dual-stream playlist) |
-| GET | `/charts/` | Fetch trending Indian music charts |
-| GET | `/qr/` | Generate a Base64 QR code for device pairing |
-
-### WebSocket
-
-| Route | Description |
-|-------|-------------|
-| `/ws/sync?role=controller\|player` | Unified sync hub (primary) |
-| `/ws/play` | Dedicated play route |
-| `/ws/radio` | Dedicated radio route |
-| `/ws/`, `/ws/vol/`, `/ws/player/`, `/ws/qr/` | Legacy routes |
-
-#### Message Types (Unified Sync)
-
-```json
-{ "type": "play|vol|control|search|radio|suggest|qr|ping", "data": {} }
+```bash
+cp .env.example .env
+# Edit .env and set RAPIDAPI_KEY (required for lyrics fallback)
 ```
 
----
-
-## WebSocket Device Roles
-
-Two device roles connect to `/ws/sync`:
-
-- **`controller`** — Remote (phone/browser): sends search, play, volume, radio commands
-- **`player`** — Display/speaker device: receives and executes commands
-
-The server routes messages between roles using dedicated broadcaster classes (`PlayerBroadcaster`, `WebAppBroadcaster`). Pairing is done by scanning a QR code that points the second device to the server root.
-
----
-
-## Music Search & Ranking
-
-Search results are processed with a label detection + weight system:
-
-| Label | Effect |
-|-------|--------|
-| Official | +10 weight (sorted first) |
-| Remix / Live / Slowed / Cover / Lyrics | Flagged, deprioritized |
-
-Results are ordered: **Official tracks → query matches → randomized rest**, with the currently playing track excluded.
-
----
-
-## Indian Music Recommender
-
-On startup, `AsyncIndianMusicRecommender` builds a background playlist (50 songs) with the following distribution:
-
-| Genre | Share |
-|-------|-------|
-| Bollywood (2000–2009) | ~20% |
-| Bollywood (2010–2019) | ~25% |
-| Bollywood (2020–2025) | ~20% |
-| Punjabi | 15% |
-| Indie / Regional | 15% |
-| Haryanvi | 5% |
-
-Collections are fetched in parallel using `asyncio.gather`. The final playlist is shuffled before serving via `/charts/`.
-
----
-
-## Local Development
-
-**1. Install dependencies**
+**2. Install dependencies**
 
 ```bash
 pip install -r requirements.txt
 ```
 
-**2. Set environment variables**
-
-```bash
-export RAPIDAPI_KEY=your_key_here
-# Optional:
-export RAPIDAPI_HOST=spotify-web-api3.p.rapidapi.com
-```
-
-**3. Run the dev server**
+**3. Run locally**
 
 ```bash
 python run.py
-# Server starts at http://localhost:8045
+# → http://localhost:8045
+# → API docs at http://localhost:8045/docs
 ```
+
+---
+
+## Configuration
+
+All settings are defined in `app/core/config.py` using **Pydantic `BaseSettings`**.
+They are read from environment variables or a `.env` file — no hardcoded secrets.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `RAPIDAPI_KEY` | Yes* | — | Musixmatch lyrics fallback (*not needed if YT lyrics always succeed) |
+| `RAPIDAPI_HOST` | No | `spotify-web-api3.p.rapidapi.com` | RapidAPI host |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `HOST` | No | `0.0.0.0` | Bind address |
+| `PORT` | No | `8045` | Bind port |
+| `DEBUG` | No | `false` | Enable debug mode |
+
+---
+
+## API Reference
+
+### HTTP Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/` | Jinja2 player UI |
+| POST | `/search/` | Parallel song + video search; returns JSON or re-renders UI |
+| GET | `/suggestions/` | Live autocomplete |
+| GET | `/lyrics/` | Lyrics (YTMusic → RapidAPI fallback) |
+| GET | `/track/{idx}/` | Track metadata + lyrics from the current queue |
+| POST | `/radio/` | Start radio from a seed track |
+| GET | `/charts/` | Trending Indian music playlist |
+| GET | `/qr/` | Base64 QR code for device pairing |
+
+Full interactive docs: **`/docs`** (Swagger UI) or **`/redoc`** (ReDoc).
+
+### WebSocket Endpoints
+
+| Path | Description |
+|---|---|
+| `/ws/sync?role=controller\|player` | **Primary** — unified sync hub |
+| `/ws/play` | Dedicated play / search route |
+| `/ws/radio` | Dedicated radio route |
+| `/ws/`, `/ws/vol/`, `/ws/qr/`, `/ws/player/` | Legacy (deprecated, kept for compatibility) |
+
+#### Sync Hub Message Format
+
+```json
+{ "type": "<action>", "data": { ... } }
+```
+
+| `type` | Direction | Description |
+|---|---|---|
+| `ping` | Client → Server | Heartbeat; player includes `currentTime`, `duration`, `videoId` |
+| `pong` | Server → Client | Heartbeat response |
+| `player_status` | Server → Controllers | Current playback position relayed from player |
+| `play` | Controller → Server | Play a specific track + populate radio queue |
+| `search` | Controller → Server | Global search; results broadcast to all controllers |
+| `radio` | Controller → Server | Start radio mode |
+| `suggest` | Controller → Server | Autocomplete; response sent back to requester only |
+| `vol` | Any → Server | Volume change; synced to all other clients |
+| `mute` | Any → Server | Mute toggle; synced to all other clients |
+| `control` | Any → Server | Play / Pause / Next / Prev; broadcast to all |
+| `qr` | Controller → Server | Generate QR for a URL; response sent to requester only |
+| `search_result` | Server → Controllers | Search / play results |
+| `radio_result` | Server → Controllers | Radio playlist results |
+
+---
+
+## Architecture Notes
+
+### Application State (`app/core/state.py`)
+
+A single `AppState` dataclass instance (`app_state`) is the **only** place mutable runtime state lives.
+All modules import and mutate this one object — no scattered module-level globals.
+
+```python
+from app.core.state import app_state
+
+app_state.out_tracks          # current track queue
+app_state.player_context      # volume, mute, music_type, last search context
+app_state.next_song           # title / videoId / crossfade timestamp
+```
+
+### Configuration (`app/core/config.py`)
+
+`Settings` inherits from Pydantic `BaseSettings`.
+Values cascade: **env vars > `.env` file > field defaults**.
+Import the singleton anywhere:
+
+```python
+from app.core.config import settings
+settings.rapidapi_key
+settings.cors_origins
+```
+
+### Dependency Injection (`app/api/deps.py`)
+
+FastAPI `Depends()` providers are centralised here so route handlers stay thin and testable:
+
+```python
+from app.api.deps import get_music_service
+
+@router.get("/foo")
+async def foo(svc: MusicService = Depends(get_music_service)):
+    ...
+```
+
+### Logging (`app/core/logging.py`)
+
+`setup_logging()` is called once in the lifespan handler.
+Every module creates its own named logger:
+
+```python
+import logging
+logger = logging.getLogger(__name__)
+```
+
+### Music Service (`app/services/music_service.py`)
+
+- One `YTMusic` session shared with the recommender (no duplicate auth).
+- `_best_thumbnail()` and `_clean_suggestions()` are module-level helpers — no duplication between search and radio paths.
+- `fetch_lyrics` is a sync method (safe — FastAPI runs sync endpoints in a thread pool).
+- `perform_search` and `start_radio` are async and use `ThreadPoolExecutor` for the blocking ytmusicapi calls.
+
+### Indian Music Recommender (`app/services/recommender_system.py`)
+
+Builds a genre-balanced database at startup using `asyncio.gather` over a thread pool.
+`generate_dynamic_playlist(n)` samples from the database respecting the distribution below.
+
+| Genre | Share |
+|---|---|
+| Bollywood 2000–2025 (3 eras) | 65 % |
+| Punjabi | 15 % |
+| Indie / Regional | 15 % |
+| Haryanvi | 5 % |
 
 ---
 
@@ -148,28 +219,35 @@ python run.py
 
 **Render.com** (configured via `render.yaml`):
 
-- **Build command:** `pip install -r requirements.txt`
-- **Start command:** `gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT`
-
-**Manual / Docker:**
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+Build:  pip install -r requirements.txt
+Start:  gunicorn -k uvicorn.workers.UvicornWorker app.main:app --bind 0.0.0.0:$PORT
 ```
 
-**Required environment variables:**
+**Any ASGI host:**
 
-| Variable | Required | Default |
-|----------|----------|---------|
-| `RAPIDAPI_KEY` | Yes | — |
-| `RAPIDAPI_HOST` | No | `spotify-web-api3.p.rapidapi.com` |
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+```
+
+Set `RAPIDAPI_KEY` (and optionally `RAPIDAPI_HOST`) as environment variables on the host platform.
 
 ---
 
-## Notes
+## Key Changes vs. v1
 
-- **State is global** — all connected clients share a single track queue (`out_tracks`). There is no per-user session isolation.
-- **No database** — everything is computed on-demand and cached in memory.
-- **Startup time** — the first run may take a few seconds while the recommender builds its collections in the background.
-- **ytmusicapi** — uses an unofficial YouTube Music API wrapper; no API key required for search/radio.
-- **CORS** — whitelisted for `localhost`, `127.0.0.1`, `0.0.0.0:5500`, and `rahulsingh9878.github.io`.
+| Area | Before | After |
+|---|---|---|
+| Configuration | Bare `os.environ.get` | Pydantic `BaseSettings` with validation + `.env` support |
+| State | Module-level mutable globals | `AppState` dataclass singleton |
+| Startup hook | Deprecated `@router.on_event` | `lifespan` context manager |
+| Logging | `print()` everywhere | `logging.getLogger(__name__)` per module |
+| Request context | `default_context["request"] = request` leaked across requests | Fresh copy per request via `_template_context()` |
+| Suggestions logic | Duplicated in HTTP + WS handlers | Single `_clean_suggestions()` in `MusicService` |
+| Thumbnails | Duplicated resolution logic in search + radio | Single `_best_thumbnail()` helper |
+| YTMusic sessions | Two instances (service + recommender) | One shared instance |
+| `requirements.txt` | Unpinned, missing `qrcode` | All versions pinned, `qrcode[pil]` + `httpx` + `pydantic-settings` added |
+| Legacy WS errors | Bare `except: pass` | Named `except Exception` with `logger.warning` |
+| Root `utils.py` | Duplicate of `app/utils/helpers.py` | Deleted |
+| Response types | Untyped dicts | Pydantic `BaseModel` response schemas |
+| API docs | None | Auto-generated at `/docs` and `/redoc` |

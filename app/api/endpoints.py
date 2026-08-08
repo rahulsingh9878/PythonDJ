@@ -1,294 +1,321 @@
-from fastapi import APIRouter, Request, Form, Query, HTTPException, Depends
+"""
+HTTP REST endpoints.
+
+All business logic lives in MusicService; these handlers are thin
+request-parsing / response-shaping wrappers.
+"""
+
+import logging
+from typing import Optional
+
+from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from typing import Optional, List
-import copy
-import random
-import time
-import requests
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
+from ..core.config import settings
+from ..core.state import app_state
+from ..models.responses import (
+    ChartsResponse,
+    LyricsResponse,
+    SuggestionsResponse,
+    TrackLyricsResponse,
+)
 from ..services.music_service import music_service
-from ..services.connection_manager import manager
-from ..core.state import out_tracks, default_context, next_song_dt, RESULT_CACHE
-from ..utils.helpers import find_video_id, detect_verses, generate_qr_base64
-from ..core.config import RAPIDAPI_KEY, RAPIDAPI_HOST, RAPIDAPI_URL
+from ..utils.helpers import detect_verses, generate_qr_base64
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
 
-@router.on_event("startup")
-async def startup_event():
-    """Start building the music database in the background on app startup."""
-    from ..core import state
-    state.server_start_time = time.time()
-    await music_service.initialize()
+# ---------------------------------------------------------------------------
+# Startup event is now handled by the lifespan handler in app/main.py
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+def _template_context(request: Request, overrides: dict = None) -> dict:
+    """
+    Build the Jinja2 template context from current player state.
+
+    Never mutates `app_state.player_context` directly – instead returns
+    a *fresh copy* with `request` injected so the request object does not
+    leak into the shared state between requests.
+    """
+    ctx = dict(app_state.player_context)
+    ctx["request"] = request
+    if "music_type" not in ctx:
+        ctx["music_type"] = "songs"
+    if overrides:
+        ctx.update(overrides)
+    return ctx
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 @router.get("/", response_class=HTMLResponse)
 async def index_webview(request: Request):
-    default_context["request"] = request
-    if "music_type" not in default_context:
-        default_context["music_type"] = "songs"
-    return templates.TemplateResponse("index.html", default_context)
+    """Render the main music-player UI."""
+    return templates.TemplateResponse("index.html", _template_context(request))
+
 
 @router.post("/search/")
 async def search_endpoint(
     request: Request,
-    query: str = Form(..., example="MASAKALI"), 
+    query: str = Form(..., examples=["MASAKALI"]),
     limit: int = Form(30, ge=1, le=50),
     nextPlay: bool = Form(False),
     maxVol: int = Form(100, ge=1, le=100),
     music_type: str = Form("songs"),
     videoId: Optional[str] = Form(None),
-    refresh: bool = Form(False)
+    refresh: bool = Form(False),
 ):
     """
-    Search a song on YouTube Music (by query) and return top recommendations (default limit 10).
+    Search YouTube Music (songs + videos, parallel) and return results.
+
+    - If `nextPlay=True` + `videoId` is set: triggers the smart-play+radio flow.
+    - Otherwise performs a regular dual-category search.
+    - Returns JSON when `Accept: application/json`, otherwise re-renders the UI.
     """
-    print(f"Searching for: {query} (type: {music_type}, videoId: {videoId}, refresh: {refresh})")
-    
+    logger.info(
+        "Search query='%s' type=%s nextPlay=%s videoId=%s refresh=%s",
+        query,
+        music_type,
+        nextPlay,
+        videoId,
+        refresh,
+    )
+
     try:
         if nextPlay and videoId:
-            # Use new Play & Radio flow
             context = await music_service.play_and_populate(
                 video_id=videoId,
                 title=query,
                 limit=limit,
                 maxVol=maxVol,
-                music_type=music_type
+                music_type=music_type,
             )
         else:
-            # Traditional Search flow
             context = await music_service.perform_search(
-                query=query, 
-                limit=limit, 
-                nextPlay=nextPlay, 
-                maxVol=maxVol, 
-                music_type=music_type, 
-                videoId=videoId, 
-                refresh=refresh
+                query=query,
+                limit=limit,
+                nextPlay=nextPlay,
+                maxVol=maxVol,
+                music_type=music_type,
+                videoId=videoId,
+                refresh=refresh,
             )
+    except Exception as exc:
+        logger.exception("Search failed for query='%s'", query)
+        raise HTTPException(status_code=500, detail=str(exc))
 
-        if request.headers.get("Accept") == "application/json":
-            return JSONResponse(content=context)
+    if request.headers.get("Accept") == "application/json":
+        return JSONResponse(content=context)
 
-
-        context["request"] = request
-        return templates.TemplateResponse("index.html", context)
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    return templates.TemplateResponse(
+        "index.html", _template_context(request, overrides=context)
+    )
 
 
-
-@router.get("/suggestions/")
+@router.get("/suggestions/", response_model=SuggestionsResponse)
 def get_search_suggestions(query: str = Query(..., min_length=1)):
-    """
-    Get search suggestions for a given query.
-    """
-    try:
-        suggestions = music_service.get_suggestions(query)
-        # Standardize response
-        # ytmusicapi usually returns a list of dicts with 'title' runs, or sometimes simple things.
-        # But commonly it attempts to look like the web suggestion.
-        # Let's inspect structure if we could, but here we just pass it or extract strings.
-        
-        # If it returns list of dicts with 'title', extract it.
-        # If list of strings, just return.
-        
-        final_list = []
-        for s in suggestions:
-            if isinstance(s, dict):
-                 # Try to find text
-                 if 'title' in s: final_list.append(s['title'])
-                 elif 'query' in s: final_list.append(s['query'])
-                 else: final_list.append(str(s))
-            elif isinstance(s, str):
-                final_list.append(s)
-        
-        # Deduplicate
-        final_list = list(dict.fromkeys(final_list))
-        
-        return {"suggestions": final_list}
-    except Exception as e:
-        print(f"Suggestion error: {e}")
-        return {"suggestions": []}
+    """Return autocomplete suggestions for *query*."""
+    suggestions = music_service.get_suggestions(query)
+    return {"suggestions": suggestions}
 
 
-@router.get("/lyrics/")
-def get_lyrics_endpoint(title: str = Query(..., example="MASAKALI"), artist: Optional[str] = Query(None)):
+@router.get("/lyrics/", response_model=LyricsResponse)
+def get_lyrics_endpoint(
+    title: str = Query(..., examples=["MASAKALI"]),
+    artist: Optional[str] = Query(None),
+):
     """
-    Directly calls RapidAPI (legacy endpoint)
+    Fetch lyrics directly (legacy endpoint).
+
+    Tries YouTube Music first; falls back to RapidAPI / Musixmatch.
+    Requires ``RAPIDAPI_KEY`` environment variable for the fallback.
     """
-    # For now, replicate logic or call service.
-    # The original endpoint returned wrapper around RapidAPI response.
-    # We can use music_service.fetch_lyrics but it attempts YT first if browseId provided.
-    # Here we don't have browseId.
-    
-    if not RAPIDAPI_KEY:
-         raise HTTPException(status_code=500, detail="Missing RAPIDAPI_KEY")
-    
-    # We can adapt music_service.fetch_lyrics to force RapidAPI if we want, or rely on its fallback.
-    # But `fetch_lyrics` does a YT check only if browseId is present.
-    # So calling it without browseId should fall back to RapidAPI instantly.
-    
+    if not settings.rapidapi_key:
+        raise HTTPException(status_code=500, detail="RAPIDAPI_KEY is not configured")
+
     result = music_service.fetch_lyrics(title, artist, browseId=None, delay=0.5)
+
     if "error" in result:
-         # Need to map internal errors to HTTP exceptions to match old behavior
-         # Original code raised HTTPException on some errors.
-         if result["status"] == 500: raise HTTPException(status_code=500, detail=result["error"])
-         if result["status"] == 502: raise HTTPException(status_code=502, detail=result["error"])
-         if result["status"] == 404: raise HTTPException(status_code=404, detail=result["error"])
-    
+        status = result.get("status", 500)
+        raise HTTPException(status_code=status, detail=result["error"])
+
     return result
 
 
-@router.get("/track/{idx}/")
+@router.get("/track/{idx}/", response_model=TrackLyricsResponse)
 def get_track_lyrics_by_index(idx: int):
-    from ..core import state
+    """
+    Return track metadata + lyrics for the track at *idx* in the current
+    queue (`app_state.out_tracks`).  Also updates `app_state.next_song`
+    with the first verse timestamp so the player knows when to cross-fade.
+    """
     if idx < 0:
         raise HTTPException(status_code=400, detail="idx must be >= 0")
 
-    try:
-        if idx >= len(state.out_tracks):
-            raise HTTPException(status_code=400, detail=f"idx {idx} out of range (0..{len(state.out_tracks)-1})")
+    if idx >= len(app_state.out_tracks):
+        raise HTTPException(
+            status_code=400,
+            detail=f"idx {idx} out of range (0..{len(app_state.out_tracks) - 1})",
+        )
 
-        t = state.out_tracks[idx]
-        title = t.get("title", "")
-        artist_name = t.get("artist", "")
-        video_id = t.get("videoId", "")
-        music_url = f"https://music.youtube.com/watch?v={video_id}" if video_id else ""
+    t = app_state.out_tracks[idx]
+    title = t.get("title", "")
+    artist = t.get("artist", "")
+    video_id = t.get("videoId", "")
 
-        selected = {
-            "index": idx,
-            "title": title,
-            "artist": artist_name,
-            "videoId": video_id,
-            "music_url": music_url
-        }
+    selected = {
+        "index": idx,
+        "title": title,
+        "artist": artist,
+        "videoId": video_id,
+        "music_url": (
+            f"https://music.youtube.com/watch?v={video_id}" if video_id else ""
+        ),
+    }
 
-    except requests.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    browse_id = t.get("browseId")
+    lyrics_response = music_service.fetch_lyrics(title, artist, browseId=browse_id)
 
-    # Fetch lyrics
-    browse_id = t.get("browseId") # Might be None
-    lyrics_response = music_service.fetch_lyrics(title, artist_name, browseId=browse_id)
-    
     verses = []
     lyrics_data = lyrics_response.get("data")
-    
+
     if lyrics_data:
         if lyrics_response.get("source") == "YT":
-             raw_text = lyrics_data.get("lyrics", "")
-             blocks = raw_text.split("\n\n")
-             for i, block in enumerate(blocks):
-                 if block.strip():
-                     verses.append({
-                         "index": i,
-                         "start_time": 0 if i == 0 else -1,
-                         "end_time": -1,
-                         "first_line": block.strip().split("\n")[0] if block else "",
-                         "text": block.strip()
-                     })
+            raw_text = lyrics_data.get("lyrics", "")
+            for i, block in enumerate(raw_text.split("\n\n")):
+                if block.strip():
+                    verses.append(
+                        {
+                            "index": i,
+                            "start_time": 0 if i == 0 else -1,
+                            "end_time": -1,
+                            "first_line": block.strip().split("\n")[0],
+                            "text": block.strip(),
+                        }
+                    )
         else:
             verses = detect_verses(lyrics_data, gap_threshold=8.0)
-            
-    state.next_song_dt["title"] = title
-    state.next_song_dt["videoId"] = video_id
-    
-    if verses and verses[0].get('start_time', -1) >= 0:
-        state.next_song_dt["timestamp"] = int(verses[0]['start_time'])
-    else:
-        state.next_song_dt["timestamp"] = 20
 
-    return {"selected_track": selected, "verse": verses, "source": lyrics_response.get("source", "Unknown")}
+    # Update next-song crossfade metadata
+    app_state.next_song["title"] = title
+    app_state.next_song["videoId"] = video_id
+    app_state.next_song["timestamp"] = (
+        int(verses[0]["start_time"])
+        if verses and verses[0].get("start_time", -1) >= 0
+        else 20
+    )
+
+    return {
+        "selected_track": selected,
+        "verse": verses,
+        "source": lyrics_response.get("source", "Unknown"),
+    }
+
 
 @router.post("/radio/")
 async def start_radio_mode(
     videoId: str = Form(...),
-    limit: int = Form(50)
+    limit: int = Form(50, ge=1, le=100),
 ):
-    print(f"Starting Radio Mode for videoId: {videoId}")
+    """Start radio mode seeded from *videoId*."""
+    logger.info("Radio mode starting videoId=%s limit=%d", videoId, limit)
     try:
-        result = await music_service.start_radio(video_id=videoId, limit=limit)
-        return result
-    except Exception as e:
-        print(f"Error starting radio: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return await music_service.start_radio(video_id=videoId, limit=limit)
+    except Exception as exc:
+        logger.exception("Radio failed for videoId=%s", videoId)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.get("/charts/")
+# Hardcoded failsafe tracks shown when the recommender hasn't warmed up yet
+_FAILSAFE_TRACKS = [
+    {"videoId": "k4yXQkGDbLY", "title": "Shape of You",  "artist": "Ed Sheeran"},
+    {"videoId": "JGwWNGJdvx8", "title": "Despacito",     "artist": "Luis Fonsi"},
+    {"videoId": "OPf0YbXqDm0", "title": "Uptown Funk",   "artist": "Mark Ronson"},
+    {"videoId": "09R8_2nJtjg", "title": "Sugar",         "artist": "Maroon 5"},
+]
+
+
+@router.get("/charts/", response_model=ChartsResponse)
 def get_charts(country: str = Query("IN", min_length=2, max_length=2)):
-    print(f"Fetching charts for {country} using AsyncIndianMusicRecommender...")
-    
-    top_songs = []
-    trending = []
-    top_videos = [] # Not used in output but var existed in original
+    """
+    Return trending / chart tracks.
+
+    Uses the AsyncIndianMusicRecommender playlist when the database has
+    warmed up, otherwise falls back to a small set of hardcoded tracks.
+    """
+    logger.info("Charts request country=%s", country)
 
     try:
-        # Use Recommender via music_service
-        dynamic_playlist = music_service.recommender.generate_dynamic_playlist(50)
-        
-        if dynamic_playlist:
-            formatted_items = []
-            for s in dynamic_playlist:
-                formatted_items.append({
-                    "title": s["title"],
-                    "artist": s["artist"],
-                    "videoId": s["videoId"],
-                    "browseId": "",
-                    "music_url": s.get("music_url", s.get("url", "")), # Safety check
-                    "thumbnail": s["thumbnail"],
-                    "type": "chart",
-                    "labels": ["Trending", s.get("category", "")[:1].upper() + s.get("category", "")[1:]],
-                    "weight": 10
-                })
-            
-            top_songs = formatted_items[:25]
-            trending = formatted_items[25:]
-        else:
-             raise Exception("Recommender returned empty")
+        playlist = music_service.recommender.generate_dynamic_playlist(50)
+        if not playlist:
+            raise ValueError("Recommender returned an empty playlist")
 
-    except Exception as e:
-        print(f"Recommender failed/not ready ({e}). Using Hardcoded Failsafe.")
-        failsafe_tracks = [
-            {"videoId": "k4yXQkGDbLY", "title": "Shape of You", "artist": "Ed Sheeran", "thumbnail": "https://i.ytimg.com/vi/k4yXQkGDbLY/hqdefault.jpg"},
-            {"videoId": "JGwWNGJdvx8", "title": "Despacito", "artist": "Luis Fonsi", "thumbnail": "https://i.ytimg.com/vi/JGwWNGJdvx8/hqdefault.jpg"},
-            {"videoId": "OPf0YbXqDm0", "title": "Uptown Funk", "artist": "Mark Ronson", "thumbnail": "https://i.ytimg.com/vi/OPf0YbXqDm0/hqdefault.jpg"},
-            {"videoId": "09R8_2nJtjg", "title": "Sugar", "artist": "Maroon 5", "thumbnail": "https://i.ytimg.com/vi/09R8_2nJtjg/hqdefault.jpg"}
+        formatted = [
+            {
+                "title": s["title"],
+                "artist": s["artist"],
+                "videoId": s["videoId"],
+                "browseId": "",
+                "music_url": s.get("music_url", ""),
+                "thumbnail": s["thumbnail"],
+                "type": "chart",
+                "labels": [
+                    "Trending",
+                    s.get("category", "").capitalize(),
+                ],
+                "weight": 10,
+            }
+            for s in playlist
         ]
-        
-        failsafe_processed = []
-        for t in failsafe_tracks:
-             failsafe_processed.append({
-                "title": t["title"], "artist": t["artist"], "videoId": t["videoId"],
-                "browseId": "", "music_url": f"https://music.youtube.com/watch?v={t['videoId']}",
-                "thumbnail": t["thumbnail"], "type": "chart", "labels": ["Hit"], "weight": 10
-             })
-        top_songs = failsafe_processed
-        trending = failsafe_processed
-    
-    return {
-        "country": country,
-        "top_songs": top_songs,
-        "top_videos": top_videos,
-        "trending": trending
-    }
+
+        return {
+            "country": country,
+            "top_songs": formatted[:25],
+            "top_videos": [],
+            "trending": formatted[25:],
+        }
+
+    except Exception as exc:
+        logger.warning("Recommender not ready, using failsafe: %s", exc)
+
+        failsafe = [
+            {
+                "title": t["title"],
+                "artist": t["artist"],
+                "videoId": t["videoId"],
+                "browseId": "",
+                "music_url": f"https://music.youtube.com/watch?v={t['videoId']}",
+                "thumbnail": f"https://i.ytimg.com/vi/{t['videoId']}/hqdefault.jpg",
+                "type": "chart",
+                "labels": ["Hit"],
+                "weight": 10,
+            }
+            for t in _FAILSAFE_TRACKS
+        ]
+        return {"country": country, "top_songs": failsafe, "top_videos": [], "trending": failsafe}
+
+
 @router.get("/qr/")
 async def get_qr_code(request: Request):
     """
-    Returns a BASE64 encoded QR code for the pairing URL.
-    The URL points to the current host so people can scan it to become controllers.
+    Generate a Base64-encoded QR code pointing to the server root.
+
+    Controllers scan this to pair with the current player session.
+    Respects `X-Forwarded-Host` / `X-Forwarded-Proto` headers set by
+    reverse proxies (Nginx, Render, ngrok, etc.).
     """
-    # Prefer ngrok URL if available in headers or just use current host
     host = request.headers.get("x-forwarded-host", request.base_url.netloc)
     scheme = request.headers.get("x-forwarded-proto", "http")
     pairing_url = f"{scheme}://{host}/"
-    
-    img_base64 = generate_qr_base64(pairing_url)
-    return JSONResponse(content=img_base64)
+    logger.debug("QR pairing URL: %s", pairing_url)
+    return JSONResponse(content=generate_qr_base64(pairing_url))

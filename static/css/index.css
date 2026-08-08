@@ -85,6 +85,47 @@ body {
     background: rgba(255, 255, 255, 0.1);
 }
 
+/* --- DJ Mode Toggle --- */
+.dj-toggle-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 11px;
+    border-radius: var(--radius-full);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    font-family: var(--font-main);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 0.04em;
+}
+
+.dj-toggle-btn .dj-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
+.dj-toggle-btn:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    color: var(--text-dim);
+}
+
+.dj-toggle-btn.active {
+    background: rgba(255, 0, 0, 0.12);
+    border-color: var(--primary);
+    color: var(--primary);
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.25);
+    animation: djPulse 2.5s ease-in-out infinite;
+}
+
+@keyframes djPulse {
+    0%, 100% { box-shadow: 0 0 8px rgba(255, 0, 0, 0.2); }
+    50%       { box-shadow: 0 0 16px rgba(255, 0, 0, 0.45); }
+}
+
 /* --- Search & Toggles --- */
 .search-section {
     padding: 0 16px;
