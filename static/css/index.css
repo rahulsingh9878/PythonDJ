@@ -481,6 +481,23 @@ body.searching .refresh-icon {
     text-overflow: ellipsis;
 }
 
+.player-device-row {
+    margin-top: 3px;
+    min-height: 16px;
+}
+
+#activePlayerLabel {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--primary);
+    background: rgba(255, 0, 0, 0.1);
+    border: 1px solid rgba(255, 0, 0, 0.25);
+    border-radius: var(--radius-full);
+    padding: 1px 7px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 .player-controls-right {
     display: flex;
     align-items: center;

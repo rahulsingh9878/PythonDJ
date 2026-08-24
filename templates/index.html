@@ -186,6 +186,7 @@
                 <div class="player-title" id="nowPlayingTitle">Not Playing</div>
                 <div class="player-videoid" style="display: none;" id="nowPlayingVideoID">Not Playing</div>
                 <div class="player-artist" id="nowPlayingArtist">Select a track</div>
+                <div class="player-device-row"><span id="activePlayerLabel" style="display:none;"></span></div>
             </div>
             <div class="player-controls-right">
                 <button class="control-btn" id="prevBtn" onclick="sendPlayerControl('prev')"><svg width="24" height="24"
@@ -203,21 +204,14 @@
             </div>
         </div>
         <div class="seek-container">
-            <span>1:27</span>
-            <button class="control-btn" id="muteBtn" onclick="toggleMute()" title="Mute/Unmute"
-                style="padding: 0; margin: 0; display: flex; align-items: center; justify-content: center; color: var(--text-dim);">
-                <svg id="muteIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                    <path
-                        d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                </svg>
-            </button>
+            <span id="seekCurrentTime">0:00</span>
+
             <div class="seek-bar-wrapper">
-                <div class="seek-progress" id="volProgress" style="width: {{maxVol}}%;">
+                <div class="seek-progress" id="seekProgress" style="width: 0%;">
                     <div class="seek-knob"></div>
                 </div>
-                <input type="range" class="volume-slider-hidden" id="volumeSlider" min="0" max="100" value="{{maxVol}}">
             </div>
-            <span>-2:48</span>
+            <span id="seekRemainingTime">-0:00</span>
         </div>
     </div>
 
@@ -369,8 +363,8 @@
     <script>
         // Global variables from Jinja2 templates for external JS to use
         const CONFIG = {
-            maxVol: {{ maxVol | default (100) }},
-        isMuted: { { 'true' if isMuted else 'false' } }
+            maxVol: {{ maxVol | default(100) }},
+            isMuted: {{ 'true' if isMuted else 'false' }}
         };
     </script>
     <script src="{{ url_for('static', path='js/index.js') }}"></script>

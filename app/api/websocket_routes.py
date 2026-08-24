@@ -29,6 +29,10 @@ from ..utils.helpers import generate_qr_base64
 
 logger = logging.getLogger(__name__)
 
+# Tracks connected player devices: websocket → player_id string
+_player_registry: dict = {}
+_player_counter: int = 0
+
 router = APIRouter()
 
 
@@ -86,6 +90,15 @@ async def websocket_sync_hub(
         )
 
     # ----------------------------------------------------------------
+    # Assign a stable player ID for the lifetime of this connection
+    # ----------------------------------------------------------------
+    if role == "player":
+        global _player_counter
+        _player_counter += 1
+        _player_registry[websocket] = f"Player-{_player_counter}"
+        logger.info("Player connected id=%s", _player_registry[websocket])
+
+    # ----------------------------------------------------------------
     # Broadcast helpers – pick room-scoped or global path once
     # ----------------------------------------------------------------
     async def _broadcast(message: dict, target_role: str = None) -> None:
@@ -120,9 +133,11 @@ async def websocket_sync_hub(
                         "videoId": msg_data.get("videoId", ""),
                         "state": msg_data.get("state", -1),
                         "ts": msg_data.get("ts", time.time() * 1000),
+                        "player_id": _player_registry.get(websocket, "Player-?"),
                     }
                     logger.debug(
-                        "Player heartbeat videoId=%s time=%.2f/%.2f",
+                        "Player heartbeat id=%s videoId=%s time=%.2f/%.2f",
+                        payload["player_id"],
                         payload["videoId"],
                         payload["currentTime"],
                         payload["duration"],
@@ -249,6 +264,7 @@ async def websocket_sync_hub(
     except Exception as exc:
         logger.exception("WS sync error role=%s room=%s: %s", role, room_id, exc)
     finally:
+        _player_registry.pop(websocket, None)
         if room_id:
             room_manager.unregister_sync(websocket)
         else:

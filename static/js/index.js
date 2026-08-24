@@ -243,7 +243,7 @@ class DJSyncClient {
     startHeartbeat() {
         this.pingInterval = setInterval(() => {
             if (this.ws && this.ws.readyState === WebSocket.OPEN) this.send('ping', { ts: Date.now() });
-        }, 10000);
+        }, 5000);
     }
     stopHeartbeat() { if (this.pingInterval) clearInterval(this.pingInterval); }
     retry() {
@@ -277,10 +277,19 @@ class DJSyncClient {
             case 'pong': break;
             case 'player_status':
                 if (data && data.currentTime !== undefined) {
-                    console.log(`[Sync] Player Status - Video: ${data.videoId} | Time: ${data.currentTime.toFixed(2)}s / ${data.duration ? data.duration.toFixed(2) : 0}s | State: ${data.state}`);
+                    console.log(`[Sync] Player Status - Video: ${data.videoId} | Time: ${data.currentTime.toFixed(2)}s / ${data.duration ? data.duration.toFixed(2) : 0}s | State: ${data.state} | Player: ${data.player_id || '?'}`);
 
                     const duration = parseInt(data.duration || 0);
                     const currentTime = parseInt(data.currentTime || 0);
+
+                    updateSeekBar(currentTime, duration);
+                    if (data.state === 1) startSeekTick(); else stopSeekTick();
+
+                    const playerLabel = document.getElementById('activePlayerLabel');
+                    if (playerLabel && data.player_id) {
+                        playerLabel.textContent = data.player_id;
+                        playerLabel.style.display = 'inline';
+                    }
 
                     // Trigger next automatically if < 22s left
                     if (duration > 0 && data.state === 1) { // 1 = Playing
@@ -295,6 +304,8 @@ class DJSyncClient {
                 break;
             case 'play':
                 console.log(`[Sync] Play - Video: ${data.videoId}`);
+                updateSeekBar(0, 0);
+                startSeekTick();
                 if (data.videoid) {
                     const mp = document.getElementById('miniPlayer');
                     if (mp) mp.classList.add('active');
@@ -357,9 +368,20 @@ class DJSyncClient {
         console.log("[Sync Controller] handleControl called:", data);
         if (data.action === 'toggle' || data.action === 'stateChange') {
             if (data.state) {
+                const playerLabel = document.getElementById('activePlayerLabel');
+                const activePlayer = playerLabel ? playerLabel.textContent.trim() : null;
+                const fromPlayer = data.player || null;
+
+                // Only update icon if the event is from the currently active player
+                if (fromPlayer && activePlayer && fromPlayer !== activePlayer) {
+                    console.log(`[Sync Controller] Ignoring stateChange from ${fromPlayer}, active player is ${activePlayer}`);
+                    return;
+                }
+
                 isPlaying = (data.state === 'playing');
                 const pp2 = document.getElementById('playPausePath');
                 if (pp2) pp2.setAttribute('d', isPlaying ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
+                if (isPlaying) startSeekTick(); else stopSeekTick();
             }
         }
     }
@@ -409,12 +431,46 @@ function selectSuggestion(val) {
 const syncClient = new DJSyncClient('controller');
 
 
-const volSlider = document.getElementById('volumeSlider');
-const volProgress = document.getElementById('volProgress');
 const navVolSlider = document.getElementById('navVolSlider');
 const navVolProgress = document.getElementById('navVolProgress');
 const navVolLabel = document.getElementById('navVolLabel');
 const qrModal = document.getElementById('qrModal');
+
+// ===================== Seek Bar =====================
+const seekProgress = document.getElementById('seekProgress');
+const seekCurrentTimeEl = document.getElementById('seekCurrentTime');
+const seekRemainingTimeEl = document.getElementById('seekRemainingTime');
+
+let seekCurrentTime = 0;
+let seekDuration = 0;
+let seekTickInterval = null;
+
+function formatTime(s) {
+    const sec = Math.max(0, Math.floor(s));
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+}
+
+function updateSeekBar(ct, dur) {
+    seekCurrentTime = ct;
+    seekDuration = dur;
+    const pct = dur > 0 ? Math.min(100, (ct / dur) * 100) : 0;
+    if (seekProgress) seekProgress.style.width = pct + '%';
+    if (seekCurrentTimeEl) seekCurrentTimeEl.textContent = formatTime(ct);
+    if (seekRemainingTimeEl) seekRemainingTimeEl.textContent = '-' + formatTime(dur - ct);
+}
+
+function startSeekTick() {
+    stopSeekTick();
+    seekTickInterval = setInterval(() => {
+        if (seekDuration > 0 && seekCurrentTime < seekDuration) {
+            updateSeekBar(seekCurrentTime + 1, seekDuration);
+        }
+    }, 1000);
+}
+
+function stopSeekTick() {
+    if (seekTickInterval) { clearInterval(seekTickInterval); seekTickInterval = null; }
+}
 
 // ===================== QR =====================
 function toggleQR(e) {
@@ -498,8 +554,6 @@ if (tracksList) {
 
 // ===================== Volume =====================
 function syncVolumeUI(v) {
-    if (volSlider) volSlider.value = v;
-    if (volProgress) volProgress.style.width = v + '%';
     if (navVolSlider) navVolSlider.value = v;
     if (navVolProgress) navVolProgress.style.height = v + '%';
     if (navVolLabel) navVolLabel.textContent = v + '%';
@@ -523,7 +577,7 @@ function updateMuteUI() {
     const muteIcon = document.getElementById('muteIcon');
     if (!muteIcon) return;
 
-    const vol = volSlider ? parseInt(volSlider.value) : 100;
+    const vol = navVolSlider ? parseInt(navVolSlider.value) : 100;
     const effectivelyMuted = isMuted || vol === 0;
 
     if (effectivelyMuted) {
@@ -537,7 +591,6 @@ function updateMuteUI() {
 
 window.addEventListener('load', updateMuteUI);
 
-if (volSlider) volSlider.addEventListener('input', (e) => updateAllVolume(e.target.value));
 
 let volumeHideTimer = null;
 function resetVolumeTimer() {
