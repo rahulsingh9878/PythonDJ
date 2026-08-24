@@ -62,10 +62,27 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+    color: #ff0202;
 }
 
 .header-logo svg {
-    color: var(--primary);
+    color: inherit;
+}
+
+.header-text {
+    font-size: 1.2em;
+    font-weight: 700;
+    color: #ff0202;
+}
+
+.header-text{
+    font-size: 1.2em;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ff0202;
+
 }
 
 .icon-btn {

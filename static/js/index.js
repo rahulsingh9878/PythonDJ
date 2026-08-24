@@ -215,6 +215,8 @@ class DJSyncClient {
             console.log('[Sync] ✅ Connected');
             this.reconnectAttempts = 0;
             this.startHeartbeat();
+            const logoSvg = document.querySelector('#header-logo svg');
+            if (logoSvg) logoSvg.style.color = '#0fff02';
         };
         this.ws.onmessage = (e) => {
             try { this.handleMessage(JSON.parse(e.data)); }
@@ -223,6 +225,8 @@ class DJSyncClient {
         this.ws.onclose = (event) => {
             console.log('[Sync] 🔌 Disconnected', event.code);
             this.stopHeartbeat();
+            const logoSvg = document.querySelector('#header-logo svg');
+            if (logoSvg) logoSvg.style.color = '#ff0202';
             if (this._changingRoom) return;
             if (event.code === 4001) {
                 // Room no longer exists; drop back to idle
