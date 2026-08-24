@@ -189,6 +189,8 @@ async function fetchCharts() {
 class DJSyncClient {
     constructor(role = 'controller') {
         this.role = role;
+        this.roomId = null;
+        this._changingRoom = false;
         this.ws = null;
         this.reconnectAttempts = 0;
         this.maxReconnectDelay = 30000;
@@ -203,9 +205,10 @@ class DJSyncClient {
             window.location.hostname.startsWith('10.') ||
             window.location.hostname.startsWith('172.');
         const WBase = 'wss://unappendaged-aretha-unwaning.ngrok-free.dev';
+        const roomSuffix = this.roomId ? `&room_id=${this.roomId}` : '';
         const url = isLocal
-            ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.hostname}:8045/ws/sync?role=${this.role}`
-            : `${WBase}/ws/sync?role=${this.role}`;
+            ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.hostname}:8045/ws/sync?role=${this.role}${roomSuffix}`
+            : `${WBase}/ws/sync?role=${this.role}${roomSuffix}`;
         console.log(`[Sync] Connecting to ${url}...`);
         this.ws = new WebSocket(url);
         this.ws.onopen = () => {
@@ -217,7 +220,24 @@ class DJSyncClient {
             try { this.handleMessage(JSON.parse(e.data)); }
             catch (err) { console.error('[Sync] Parse error:', err); }
         };
-        this.ws.onclose = () => { console.log('[Sync] 🔌 Disconnected'); this.stopHeartbeat(); this.retry(); };
+        this.ws.onclose = (event) => {
+            console.log('[Sync] 🔌 Disconnected', event.code);
+            this.stopHeartbeat();
+            if (this._changingRoom) return;
+            if (event.code === 4001) {
+                // Room no longer exists; drop back to idle
+                this.roomId = null;
+                if (typeof roomClient !== 'undefined') {
+                    roomClient.state = 'IDLE';
+                    roomClient.currentRoom = null;
+                    roomClient._showIdleView();
+                    roomClient._updateHeaderBtn();
+                    showToast('Room no longer available');
+                }
+                return;
+            }
+            this.retry();
+        };
         this.ws.onerror = (err) => { console.error('[Sync] ❌ Error:', err); };
     }
     startHeartbeat() {
@@ -227,9 +247,19 @@ class DJSyncClient {
     }
     stopHeartbeat() { if (this.pingInterval) clearInterval(this.pingInterval); }
     retry() {
+        if (this._changingRoom) return;
         const delay = Math.min(this.baseDelay * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
         console.log(`[Sync] Retrying in ${delay / 1000}s...`);
         setTimeout(() => { this.reconnectAttempts++; this.connect(); }, delay);
+    }
+
+    setRoom(room_id) {
+        this._changingRoom = true;
+        this.stopHeartbeat();
+        this.roomId = room_id;
+        this.reconnectAttempts = 0;
+        if (this.ws) { try { this.ws.close(); } catch (_) {} }
+        setTimeout(() => { this._changingRoom = false; this.connect(); }, 150);
     }
     send(type, data) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ type, data }));
@@ -588,3 +618,254 @@ function sortResults(criteria) {
 }
 
 window.addEventListener('load', () => { if (queryInput && !queryInput.value) queryInput.focus(); });
+
+// ===================== Toast =====================
+let toastTimer = null;
+function showToast(msg) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ===================== Room Panel =====================
+function openRoomPanel() {
+    document.getElementById('roomPanel').classList.add('active');
+    document.getElementById('roomPanelOverlay').classList.add('active');
+    roomClient.refreshRooms();
+}
+
+function closeRoomPanel() {
+    document.getElementById('roomPanel').classList.remove('active');
+    document.getElementById('roomPanelOverlay').classList.remove('active');
+}
+
+// ===================== RoomClient =====================
+class RoomClient {
+    constructor() {
+        this.ws = null;
+        this.state = 'IDLE'; // IDLE | HOST | MEMBER
+        this.currentRoom = null;
+        this._reconnectTimer = null;
+        this._pingInterval = null;
+        this._reconnectDelay = 3000;
+        this.connect();
+    }
+
+    connect() {
+        const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname)
+            || location.hostname.startsWith('192.168.')
+            || location.hostname.startsWith('10.')
+            || location.hostname.startsWith('172.');
+        const WBase = 'wss://unappendaged-aretha-unwaning.ngrok-free.dev';
+        const url = isLocal
+            ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.hostname}:8045/ws/room`
+            : `${WBase}/ws/room`;
+
+        this.ws = new WebSocket(url);
+        this.ws.onopen = () => {
+            console.log('[Room] Connected');
+            this._reconnectDelay = 3000;
+            this._startHeartbeat();
+        };
+        this.ws.onmessage = (e) => {
+            try { this._handle(JSON.parse(e.data)); } catch (err) { console.error('[Room] Parse error', err); }
+        };
+        this.ws.onclose = () => {
+            console.log('[Room] Disconnected');
+            this._stopHeartbeat();
+            this._reconnectTimer = setTimeout(() => {
+                this._reconnectDelay = Math.min(this._reconnectDelay * 2, 30000);
+                this.connect();
+            }, this._reconnectDelay);
+        };
+        this.ws.onerror = () => {};
+    }
+
+    _startHeartbeat() {
+        this._pingInterval = setInterval(() => {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) this._send('ping', {});
+        }, 30000);
+    }
+
+    _stopHeartbeat() { clearInterval(this._pingInterval); }
+
+    _send(type, data = {}) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type, data }));
+        }
+    }
+
+    _handle(msg) {
+        const { type, data } = msg;
+        switch (type) {
+            case 'rooms_list':
+                this._renderList(data.rooms || []);
+                break;
+            case 'room_created':
+                this.state = 'HOST';
+                this.currentRoom = data;
+                this._showHostView(data);
+                this._updateHeaderBtn();
+                showToast('Room created — share the code!');
+                syncClient.setRoom(data.id);
+                break;
+            case 'room_joined':
+                this.state = 'MEMBER';
+                this.currentRoom = data;
+                this._showMemberView(data);
+                this._updateHeaderBtn();
+                syncClient.setRoom(data.id);
+                break;
+            case 'member_joined':
+            case 'member_left':
+                this._updateMemberCount(data.member_count);
+                break;
+            case 'room_closed':
+                this.state = 'IDLE';
+                this.currentRoom = null;
+                this._showIdleView();
+                this._updateHeaderBtn();
+                showToast('Room was closed by the host');
+                syncClient.setRoom(null);
+                break;
+            case 'error':
+                showToast(this._errorMsg(data.code, data.message));
+                break;
+            case 'pong':
+                break;
+        }
+    }
+
+    _errorMsg(code) {
+        const map = {
+            ROOM_NOT_FOUND: 'Room not found — check the code',
+            ROOM_FULL: 'Room is full',
+            ALREADY_IN_ROOM: 'Leave your current room first',
+            NAME_REQUIRED: 'Enter a room name or code',
+        };
+        return map[code] || 'Something went wrong';
+    }
+
+    // ── Public actions ──────────────────────────────────────────────
+
+    createRoom() {
+        const input = document.getElementById('roomNameInput');
+        const name = (input ? input.value : '').trim();
+        if (!name) { showToast('Enter a room name'); return; }
+        this._send('create_room', { name, max_members: 20 });
+        if (input) input.value = '';
+    }
+
+    joinRoom(roomId) {
+        this._send('join_room', { room_id: roomId });
+    }
+
+    leaveRoom() {
+        this._send('leave_room', {});
+        this.state = 'IDLE';
+        this.currentRoom = null;
+        this._showIdleView();
+        this._updateHeaderBtn();
+        this.refreshRooms();
+        syncClient.setRoom(null);
+    }
+
+    refreshRooms() {
+        this._send('list_rooms', {});
+    }
+
+    copyCode() {
+        if (!this.currentRoom) return;
+        const code = this.currentRoom.id || '';
+        navigator.clipboard.writeText(code).then(
+            () => showToast(`Copied ${code}`),
+            () => showToast('Could not copy — code: ' + code)
+        );
+    }
+
+    // ── View rendering ──────────────────────────────────────────────
+
+    _showIdleView() {
+        document.getElementById('roomIdleView').style.display = '';
+        document.getElementById('roomHostView').style.display = 'none';
+        document.getElementById('roomMemberView').style.display = 'none';
+    }
+
+    _showHostView(data) {
+        document.getElementById('roomIdleView').style.display = 'none';
+        document.getElementById('roomHostView').style.display = '';
+        document.getElementById('roomMemberView').style.display = 'none';
+        document.getElementById('hostRoomCode').textContent = data.id || '——';
+        document.getElementById('hostRoomName').textContent = data.name || '';
+        document.getElementById('hostMemberCount').textContent = this._memberLabel(data.member_count);
+    }
+
+    _showMemberView(data) {
+        document.getElementById('roomIdleView').style.display = 'none';
+        document.getElementById('roomHostView').style.display = 'none';
+        document.getElementById('roomMemberView').style.display = '';
+        document.getElementById('memberRoomCode').textContent = data.id || '——';
+        document.getElementById('memberRoomName').textContent = data.name || '';
+        document.getElementById('memberCount').textContent = this._memberLabel(data.member_count);
+    }
+
+    _updateMemberCount(count) {
+        const label = this._memberLabel(count);
+        const hEl = document.getElementById('hostMemberCount');
+        const mEl = document.getElementById('memberCount');
+        if (hEl) hEl.textContent = label;
+        if (mEl) mEl.textContent = label;
+        if (this.currentRoom) this.currentRoom.member_count = count;
+    }
+
+    _renderList(rooms) {
+        const container = document.getElementById('roomsList');
+        if (!container) return;
+
+        if (!rooms.length) {
+            container.innerHTML = `
+                <div class="room-empty-state">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" style="color:var(--text-muted);margin-bottom:10px">
+                        <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                    </svg>
+                    <p>No rooms yet</p>
+                    <span>Create one above to get started</span>
+                </div>`;
+            return;
+        }
+
+        const inRoom = this.state !== 'IDLE';
+        container.innerHTML = rooms.map(r => {
+            const full = r.member_count >= r.max_members;
+            const disabled = inRoom || full;
+            const meta = `${r.member_count}/${r.max_members} members${full ? ' · Full' : ''}`;
+            return `
+            <div class="room-card">
+                <div class="room-card-info">
+                    <div class="room-card-name">${this._esc(r.name)}</div>
+                    <div class="room-card-meta">${meta} · <span style="font-family:monospace;letter-spacing:.05em">${r.id}</span></div>
+                </div>
+                <button class="room-join-btn" onclick="roomClient.joinRoom('${r.id}')" ${disabled ? 'disabled' : ''}>
+                    Join
+                </button>
+            </div>`;
+        }).join('');
+    }
+
+    _memberLabel(n) { return n === 1 ? '1 member' : `${n} members`; }
+
+    _esc(s) {
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    _updateHeaderBtn() {
+        const btn = document.getElementById('roomHeaderBtn');
+        if (!btn) return;
+        btn.classList.toggle('room-active', this.state !== 'IDLE');
+    }
+}
+
+const roomClient = new RoomClient();

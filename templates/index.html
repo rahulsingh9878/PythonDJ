@@ -26,6 +26,11 @@
                         <span class="dj-icon">◈</span>
                         <span class="dj-text">DJ</span>
                     </button>
+                    <button class="icon-btn" id="roomHeaderBtn" onclick="openRoomPanel()" title="Rooms">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                        </svg>
+                    </button>
                     <button class="icon-btn" onclick="toggleSearch()" title="Search">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                             <path
@@ -272,6 +277,94 @@
     </div>
     </div>
 
+
+    <!-- Room Panel Overlay -->
+    <div class="room-panel-overlay" id="roomPanelOverlay" onclick="closeRoomPanel()"></div>
+
+    <!-- Room Panel -->
+    <div class="room-panel" id="roomPanel">
+        <div class="room-panel-handle"></div>
+        <div class="room-panel-header">
+            <h2 class="room-panel-title">Rooms</h2>
+            <button class="icon-btn" onclick="closeRoomPanel()" style="color: var(--text-dim);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- IDLE: Browse + Create -->
+        <div id="roomIdleView">
+            <div class="room-create-section">
+                <div class="room-create-row">
+                    <input type="text" id="roomNameInput" class="room-name-input" placeholder="Room name…" maxlength="40" autocomplete="off">
+                    <button class="room-create-btn" onclick="roomClient.createRoom()">Create</button>
+                </div>
+            </div>
+
+            <div class="room-list-header">
+                <span>Available Rooms</span>
+                <button class="room-refresh-btn" onclick="roomClient.refreshRooms()" title="Refresh">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
+                    </svg>
+                </button>
+            </div>
+            <div id="roomsList" class="rooms-list">
+                <div class="room-empty-state">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-muted); margin-bottom: 10px;">
+                        <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+                    </svg>
+                    <p>No rooms yet</p>
+                    <span>Create one above to get started</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- HOST view -->
+        <div id="roomHostView" style="display:none;">
+            <div class="room-active-banner">
+                <div class="room-active-label">You are hosting</div>
+                <div class="room-code-wrapper">
+                    <span class="room-code" id="hostRoomCode">——</span>
+                    <button class="room-copy-btn" onclick="roomClient.copyCode()" title="Copy code">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="room-active-name" id="hostRoomName"></div>
+                <div class="room-member-pill" id="hostMemberCount">1 member</div>
+            </div>
+            <button class="room-danger-btn" onclick="roomClient.leaveRoom()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                </svg>
+                Close Room
+            </button>
+        </div>
+
+        <!-- MEMBER view -->
+        <div id="roomMemberView" style="display:none;">
+            <div class="room-active-banner">
+                <div class="room-active-label">You joined</div>
+                <div class="room-code-wrapper">
+                    <span class="room-code" id="memberRoomCode">——</span>
+                </div>
+                <div class="room-active-name" id="memberRoomName"></div>
+                <div class="room-member-pill" id="memberCount">— members</div>
+            </div>
+            <button class="room-leave-btn" onclick="roomClient.leaveRoom()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M10.09 15.59L11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67l-2.58 2.59zM19 3H5c-1.11 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                </svg>
+                Leave Room
+            </button>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
 
     <script>
         // Global variables from Jinja2 templates for external JS to use

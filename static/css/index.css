@@ -917,6 +917,359 @@ body.searching::after {
     color: #22c55e;
 }
 
+/* ─── Room Panel Overlay ─── */
+.room-panel-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 1900;
+}
+
+.room-panel-overlay.active {
+    display: block;
+}
+
+/* ─── Room Panel (bottom sheet) ─── */
+.room-panel {
+    position: fixed;
+    bottom: -100%;
+    left: 0;
+    right: 0;
+    background: #141414;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 20px 20px 0 0;
+    padding: 12px 20px 40px;
+    z-index: 2000;
+    transition: bottom 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    max-height: 88vh;
+    overflow-y: auto;
+}
+
+.room-panel.active {
+    bottom: 0;
+}
+
+.room-panel-handle {
+    width: 40px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 2px;
+    margin: 0 auto 16px;
+}
+
+.room-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.room-panel-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+}
+
+/* ─── Create Section ─── */
+.room-create-section {
+    margin-bottom: 24px;
+}
+
+.room-create-row {
+    display: flex;
+    gap: 10px;
+}
+
+.room-name-input {
+    flex: 1;
+    background: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-md);
+    color: #fff;
+    font-size: 14px;
+    font-family: var(--font-main);
+    padding: 11px 14px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.room-name-input::placeholder {
+    color: var(--text-muted);
+}
+
+.room-name-input:focus {
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.room-create-btn {
+    background: var(--primary);
+    border: none;
+    border-radius: var(--radius-md);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    font-family: var(--font-main);
+    padding: 11px 18px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.2s;
+}
+
+.room-create-btn:active {
+    opacity: 0.8;
+}
+
+/* ─── Rooms List ─── */
+.room-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.room-refresh-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    padding: 4px;
+    border-radius: 50%;
+    transition: color 0.2s, background 0.2s;
+}
+
+.room-refresh-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.rooms-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.room-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    font-size: 14px;
+    gap: 4px;
+}
+
+.room-empty-state p {
+    font-weight: 600;
+    color: var(--text-dim);
+}
+
+.room-empty-state span {
+    font-size: 13px;
+}
+
+/* ─── Room Card ─── */
+.room-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.room-card:hover {
+    background: #222;
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.room-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.room-card-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.room-card-meta {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.room-join-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-full);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-main);
+    padding: 7px 16px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.room-join-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.room-join-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ─── Active Room Views ─── */
+.room-active-banner {
+    background: rgba(255, 0, 0, 0.06);
+    border: 1px solid rgba(255, 0, 0, 0.18);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.room-active-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--primary);
+    margin-bottom: 10px;
+}
+
+.room-code-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.room-code {
+    font-family: 'Courier New', monospace;
+    font-size: 34px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.18em;
+}
+
+.room-copy-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    border-radius: 8px;
+    color: var(--text-dim);
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+}
+
+.room-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+
+.room-active-name {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+}
+
+.room-member-pill {
+    display: inline-block;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    padding: 4px 14px;
+}
+
+.room-danger-btn,
+.room-leave-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 700;
+    font-family: var(--font-main);
+    padding: 14px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.room-danger-btn {
+    background: rgba(255, 0, 0, 0.12);
+    color: var(--primary);
+    border: 1px solid rgba(255, 0, 0, 0.25);
+}
+
+.room-danger-btn:active { opacity: 0.7; }
+
+.room-leave-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-dim);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.room-leave-btn:active { opacity: 0.7; }
+
+/* ─── Room header button active state ─── */
+.icon-btn.room-active {
+    color: var(--primary);
+    animation: djPulse 2.5s ease-in-out infinite;
+}
+
+/* ─── Toast ─── */
+.toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: #2a2a2a;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-full);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--font-main);
+    padding: 10px 20px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 3000;
+    transition: opacity 0.25s, transform 0.25s;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
 .health-value.warn {
     color: #f59e0b;
 }

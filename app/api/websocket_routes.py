@@ -5,6 +5,10 @@ Primary route:  /ws/sync?role=controller|player
   - Unified hub for all real-time DJ operations.
   - Message envelope: {"type": "<action>", "data": {...}}
 
+Room route:  /ws/room
+  - Create, join, leave, and list DJ session rooms.
+  - Message envelope: {"type": "<action>", "data": {...}}
+
 Legacy routes (/ws/, /ws/vol/, /ws/qr/, /ws/player/) are kept for
 backward compatibility but log a deprecation warning on first use.
 
@@ -20,6 +24,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from ..core.state import app_state
 from ..services.connection_manager import manager, webapp_broadcaster
 from ..services.music_service import music_service
+from ..services.room_manager import room_manager
 from ..utils.helpers import generate_qr_base64
 
 logger = logging.getLogger(__name__)
@@ -35,6 +40,7 @@ router = APIRouter()
 async def websocket_sync_hub(
     websocket: WebSocket,
     role: str = Query("controller"),
+    room_id: str = Query(None),
 ):
     """
     Unified WebSocket hub for all DJ operations.
@@ -43,19 +49,57 @@ async def websocket_sync_hub(
       - ``controller`` – phone / browser remote (sends commands, receives UI updates)
       - ``player``     – display / speaker device (receives play commands)
 
+    room_id (optional):
+      When provided the connection is registered in that room's media pool and
+      all broadcasts are scoped to that room only.  Without room_id the
+      connection falls back to the global pool (backward compatible).
+
     Message format::
 
         {"type": "play|vol|mute|control|qr|ping|suggest|radio|search", "data": {...}}
     """
-    await manager.connect(websocket, role)
+    # ----------------------------------------------------------------
+    # Connect – room-scoped or global
+    # ----------------------------------------------------------------
+    room = None
+    if room_id:
+        await websocket.accept()
+        try:
+            room = room_manager.register_sync(room_id, websocket, role)
+        except ValueError:
+            await websocket.close(code=4001, reason="Room not found")
+            return
+        # Push this room's own vol/mute state
+        await websocket.send_json(
+            {"type": "vol", "data": {"volume": room.player_state.get("maxVol", 100)}}
+        )
+        await websocket.send_json(
+            {"type": "mute", "data": {"isMuted": room.player_state.get("isMuted", False)}}
+        )
+    else:
+        await manager.connect(websocket, role)
+        await websocket.send_json(
+            {"type": "vol", "data": {"volume": app_state.player_context.get("maxVol", 100)}}
+        )
+        await websocket.send_json(
+            {"type": "mute", "data": {"isMuted": app_state.player_context.get("isMuted", False)}}
+        )
 
-    # Send initial state so the client is in sync immediately
-    await websocket.send_json(
-        {"type": "vol", "data": {"volume": app_state.player_context.get("maxVol", 100)}}
-    )
-    await websocket.send_json(
-        {"type": "mute", "data": {"isMuted": app_state.player_context.get("isMuted", False)}}
-    )
+    # ----------------------------------------------------------------
+    # Broadcast helpers – pick room-scoped or global path once
+    # ----------------------------------------------------------------
+    async def _broadcast(message: dict, target_role: str = None) -> None:
+        if room_id:
+            await room_manager.broadcast_sync(room_id, message, role=target_role, exclude=websocket)
+        else:
+            await manager.broadcast(message, sender=websocket, target_role=target_role)
+
+    async def _broadcast_controllers(msg_type: str, data: dict) -> None:
+        msg = {"type": msg_type, "data": data}
+        if room_id:
+            await room_manager.broadcast_sync(room_id, msg, role="controller")
+        else:
+            await webapp_broadcaster.send(msg_type, data)
 
     try:
         while True:
@@ -63,7 +107,7 @@ async def websocket_sync_hub(
             msg_type: str = raw.get("type", "")
             msg_data: dict = raw.get("data") or {}
 
-            logger.debug("WS sync type=%s role=%s", msg_type, role)
+            logger.debug("WS sync type=%s role=%s room=%s", msg_type, role, room_id)
 
             # ----------------------------------------------------------------
             # ping / pong – heartbeat + optional player-status relay
@@ -83,10 +127,7 @@ async def websocket_sync_hub(
                         payload["currentTime"],
                         payload["duration"],
                     )
-                    await manager.broadcast(
-                        {"type": "player_status", "data": payload},
-                        target_role="controller",
-                    )
+                    await _broadcast({"type": "player_status", "data": payload}, target_role="controller")
                 await websocket.send_json({"type": "pong", "ts": time.time()})
 
             # ----------------------------------------------------------------
@@ -108,6 +149,8 @@ async def websocket_sync_hub(
                         music_type=music_type,
                         dj_mode=bool(msg_data.get("dj_mode", True)),
                     )
+                    # Forward the play command to all players in the room
+                    await _broadcast({"type": "play", "data": msg_data}, target_role="player")
                 else:
                     context = await music_service.perform_search(
                         query=query,
@@ -119,33 +162,33 @@ async def websocket_sync_hub(
                         refresh=bool(msg_data.get("refresh", False)),
                     )
 
-                await webapp_broadcaster.send("search_result", context)
+                await _broadcast_controllers("search_result", context)
 
             # ----------------------------------------------------------------
             # vol / mute – volume sync
             # ----------------------------------------------------------------
             elif msg_type == "vol":
                 if "volume" in msg_data:
-                    app_state.player_context["maxVol"] = msg_data["volume"]
-                await manager.broadcast(
-                    {"type": "vol", "data": msg_data}, sender=websocket
-                )
+                    if room:
+                        room.player_state["maxVol"] = msg_data["volume"]
+                    else:
+                        app_state.player_context["maxVol"] = msg_data["volume"]
+                await _broadcast({"type": "vol", "data": msg_data})
 
             elif msg_type == "mute":
                 if "isMuted" in msg_data:
-                    app_state.player_context["isMuted"] = bool(msg_data["isMuted"])
-                await manager.broadcast(
-                    {"type": "mute", "data": msg_data}, sender=websocket
-                )
+                    if room:
+                        room.player_state["isMuted"] = bool(msg_data["isMuted"])
+                    else:
+                        app_state.player_context["isMuted"] = bool(msg_data["isMuted"])
+                await _broadcast({"type": "mute", "data": msg_data})
 
             # ----------------------------------------------------------------
             # control – play / pause / next / prev
             # ----------------------------------------------------------------
             elif msg_type == "control":
                 logger.debug("Control action=%s", msg_data.get("action"))
-                await manager.broadcast(
-                    {"type": "control", "data": msg_data}, sender=websocket
-                )
+                await _broadcast({"type": "control", "data": msg_data})
 
             # ----------------------------------------------------------------
             # qr – generate pairing QR
@@ -179,10 +222,10 @@ async def websocket_sync_hub(
                     result = await music_service.start_radio(
                         video_id=video_id, limit=limit
                     )
-                    await webapp_broadcaster.send("radio_result", result)
+                    await _broadcast_controllers("radio_result", result)
 
             # ----------------------------------------------------------------
-            # search – global search + broadcast
+            # search – search + broadcast to controllers
             # ----------------------------------------------------------------
             elif msg_type == "search":
                 query = msg_data.get("query", "")
@@ -196,17 +239,20 @@ async def websocket_sync_hub(
                     music_type=music_type,
                     refresh=is_refresh,
                 )
-                await webapp_broadcaster.send("search_result", result)
+                await _broadcast_controllers("search_result", result)
 
             else:
                 logger.warning("Unknown WS message type=%s", msg_type)
 
     except WebSocketDisconnect:
-        logger.info("WS client disconnected role=%s", role)
+        logger.info("WS client disconnected role=%s room=%s", role, room_id)
     except Exception as exc:
-        logger.exception("WS sync error role=%s: %s", role, exc)
+        logger.exception("WS sync error role=%s room=%s: %s", role, room_id, exc)
     finally:
-        manager.disconnect(websocket)
+        if room_id:
+            room_manager.unregister_sync(websocket)
+        else:
+            manager.disconnect(websocket)
         try:
             await websocket.close()
         except Exception:
@@ -290,6 +336,212 @@ async def websocket_radio_route(websocket: WebSocket):
     except Exception as exc:
         logger.exception("WS radio route error: %s", exc)
     finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Room route – create / join / leave / list rooms
+# ---------------------------------------------------------------------------
+
+@router.websocket("/ws/room")
+async def websocket_room_hub(websocket: WebSocket):
+    """
+    WebSocket hub for DJ session room management.
+
+    On connect the server immediately pushes the current rooms list so the
+    client is in sync without having to send a list_rooms message first.
+
+    Client → Server message types:
+
+        create_room  {"name": "...", "max_members": 20}
+        join_room    {"room_id": "XK7A2Q"}
+        leave_room   {}
+        list_rooms   {}
+        ping         {}
+
+    Server → Client (targeted):
+
+        rooms_list   {"rooms": [...]}
+        room_created {"room_id", "name", "member_count", "role": "host"}
+        room_joined  {"room_id", "name", "member_count", "role": "member"}
+        error        {"code": "ROOM_NOT_FOUND|ROOM_FULL|ALREADY_IN_ROOM|NAME_REQUIRED", "message": "..."}
+        pong         {"ts": ...}
+
+    Server → Room (broadcast):
+
+        member_joined {"member_count": N}
+        member_left   {"member_count": N}
+        room_closed   {"room_id": "...", "reason": "host_left"}
+    """
+    await websocket.accept()
+    try:
+        # Push current room list immediately on connect.
+        await websocket.send_json(
+            {"type": "rooms_list", "data": {"rooms": room_manager.list_rooms()}}
+        )
+
+        while True:
+            raw = await websocket.receive_json()
+            msg_type: str = raw.get("type", "")
+            msg_data: dict = raw.get("data") or {}
+
+            logger.debug("WS room type=%s", msg_type)
+
+            # ----------------------------------------------------------------
+            # ping / pong – heartbeat
+            # ----------------------------------------------------------------
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong", "ts": time.time()})
+
+            # ----------------------------------------------------------------
+            # create_room – register a new room, caller becomes host
+            # ----------------------------------------------------------------
+            elif msg_type == "create_room":
+                name = (msg_data.get("name") or "").strip()
+                if not name:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"code": "NAME_REQUIRED", "message": "Room name is required."},
+                    })
+                    continue
+
+                max_members = int(msg_data.get("max_members", 20))
+                try:
+                    room = room_manager.create_room(
+                        host=websocket,
+                        name=name,
+                        max_members=max_members,
+                    )
+                except ValueError as exc:
+                    code = str(exc).split(":")[0]
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"code": code, "message": str(exc)},
+                    })
+                    continue
+
+                await websocket.send_json({
+                    "type": "room_created",
+                    "data": {**room.to_dict(), "role": "host"},
+                })
+                logger.info("Room created id=%s name=%r", room.id, room.name)
+
+            # ----------------------------------------------------------------
+            # join_room – add caller to an existing room as a member
+            # ----------------------------------------------------------------
+            elif msg_type == "join_room":
+                room_id = (msg_data.get("room_id") or "").strip().upper()
+                if not room_id:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"code": "NAME_REQUIRED", "message": "room_id is required."},
+                    })
+                    continue
+
+                try:
+                    room = room_manager.join_room(room_id=room_id, ws=websocket)
+                except ValueError as exc:
+                    code = str(exc).split(":")[0]
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"code": code, "message": str(exc)},
+                    })
+                    continue
+
+                # Notify the joining member.
+                await websocket.send_json({
+                    "type": "room_joined",
+                    "data": {**room.to_dict(), "role": "member"},
+                })
+                # Notify everyone else already in the room.
+                await room_manager.broadcast_to_room(
+                    room,
+                    {"type": "member_joined", "data": {"member_count": room.member_count()}},
+                    exclude=websocket,
+                )
+                logger.info("Room joined id=%s members=%d", room_id, room.member_count())
+
+            # ----------------------------------------------------------------
+            # leave_room – explicit departure (mirrors disconnect cleanup)
+            # ----------------------------------------------------------------
+            elif msg_type == "leave_room":
+                # Snapshot BEFORE leave_room() destroys the room.
+                current_room = room_manager.room_of(websocket)
+                members_snapshot = list(current_room.members) if current_room else []
+
+                if current_room and websocket is current_room.host:
+                    await room_manager.notify_sync_closed(current_room)
+
+                room_id, was_destroyed = room_manager.leave_room(websocket)
+                if room_id is None:
+                    continue
+
+                if was_destroyed:
+                    closed_msg = {
+                        "type": "room_closed",
+                        "data": {"room_id": room_id, "reason": "host_left"},
+                    }
+                    for ws in members_snapshot:
+                        try:
+                            await ws.send_json(closed_msg)
+                        except Exception:
+                            pass
+                    logger.info("Room closed by host leave id=%s", room_id)
+                else:
+                    room = room_manager.get_room(room_id)
+                    if room:
+                        await room_manager.broadcast_to_room(
+                            room,
+                            {"type": "member_left", "data": {"member_count": room.member_count()}},
+                        )
+
+            # ----------------------------------------------------------------
+            # list_rooms – return current snapshot
+            # ----------------------------------------------------------------
+            elif msg_type == "list_rooms":
+                await websocket.send_json({
+                    "type": "rooms_list",
+                    "data": {"rooms": room_manager.list_rooms()},
+                })
+
+            else:
+                logger.warning("Unknown WS room message type=%s", msg_type)
+
+    except WebSocketDisconnect:
+        logger.info("WS room client disconnected")
+    except Exception as exc:
+        logger.exception("WS room error: %s", exc)
+    finally:
+        # Snapshot BEFORE leave_room() destroys the room.
+        current_room = room_manager.room_of(websocket)
+        members_snapshot = list(current_room.members) if current_room else []
+
+        if current_room and websocket is current_room.host:
+            await room_manager.notify_sync_closed(current_room)
+
+        room_id, was_destroyed = room_manager.leave_room(websocket)
+        if room_id is not None:
+            if was_destroyed:
+                closed_msg = {
+                    "type": "room_closed",
+                    "data": {"room_id": room_id, "reason": "host_left"},
+                }
+                for ws in members_snapshot:
+                    try:
+                        await ws.send_json(closed_msg)
+                    except Exception:
+                        pass
+                logger.info("Room destroyed on host disconnect id=%s", room_id)
+            else:
+                room = room_manager.get_room(room_id)
+                if room:
+                    await room_manager.broadcast_to_room(
+                        room,
+                        {"type": "member_left", "data": {"member_count": room.member_count()}},
+                    )
         try:
             await websocket.close()
         except Exception:
