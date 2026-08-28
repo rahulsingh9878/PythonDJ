@@ -48,6 +48,17 @@ class Settings(BaseSettings):
         )
 
     # ------------------------------------------------------------------
+    # Redis cache
+    # ------------------------------------------------------------------
+    redis_url: str = "redis://localhost:6379/0"
+    redis_heatmap_ttl: int = 8640000   # 24 hours  — heatmap rarely changes
+    redis_radio_ttl: int = 180000      # 30 minutes — recommendations drift slowly
+    redis_search_ttl: int = 60000      # 10 minutes — search results are fresher
+    redis_suggestions_ttl: int = 300000 # 5 minutes  — autocomplete suggestions
+    redis_recommender_ttl: int = 2160000  # 6 hours — avoids 40+ API calls on restart
+    redis_player_ttl: int = 3600     # 1 hour   — queue / context restore after restart
+
+    # ------------------------------------------------------------------
     # CORS
     # ------------------------------------------------------------------
     cors_origins: List[str] = [

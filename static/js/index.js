@@ -331,6 +331,9 @@ class DJSyncClient {
                     updateMuteUI();
                 }
                 break;
+            case 'heatmap':
+                renderHeatmap(data.values, data.step, data.peaks);
+                break;
             case 'control':
                 this.handleControl(data);
                 break;
@@ -474,6 +477,131 @@ function startSeekTick() {
 
 function stopSeekTick() {
     if (seekTickInterval) { clearInterval(seekTickInterval); seekTickInterval = null; }
+}
+
+// ===================== Heatmap =====================
+// Compact format from backend: { values: [0..1, ...], step: seconds, peaks: [midpoint, ...] }
+function renderHeatmap(values, step, peakTimes) {
+    const wrapper = document.getElementById('heatmapWrapper');
+    const canvas = document.getElementById('heatmapCanvas');
+    if (!wrapper || !canvas || !values || values.length === 0) return;
+
+    wrapper.classList.add('visible');
+
+    const dpr = window.devicePixelRatio || 1;
+    const W = wrapper.offsetWidth;
+    const H = wrapper.offsetHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    // Background
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, W, H);
+
+    const totalDuration = values.length * step;
+    const segW = Math.max(1, W / values.length);
+
+    // Draw each segment as a vertical bar — height proportional to engagement value
+    values.forEach((v, i) => {
+        const x = (i / values.length) * W;
+        const barH = v * H;
+        const alpha = 0.25 + v * 0.75;
+        ctx.fillStyle = `rgba(255, 30, 30, ${alpha.toFixed(2)})`;
+        ctx.fillRect(x, H - barH, segW + 0.5, barH);
+    });
+
+    // Gradient fade at bottom — blends into the seek bar below
+    const fadeGrad = ctx.createLinearGradient(0, 0, 0, H);
+    fadeGrad.addColorStop(0, 'rgba(10,10,10,0)');
+    fadeGrad.addColorStop(1, 'rgba(10,10,10,0.5)');
+    ctx.fillStyle = fadeGrad;
+    ctx.fillRect(0, 0, W, H);
+
+    // Peak markers — thin white ticks at each detected hot-spot
+    if (peakTimes && peakTimes.length) {
+        ctx.fillStyle = 'rgba(255,255,255,0.75)';
+        peakTimes.forEach(midpoint => {
+            const x = Math.round((midpoint / totalDuration) * W);
+            ctx.fillRect(x - 1, 0, 2, H);
+        });
+    }
+}
+
+// ===================== Seek Interaction =====================
+const seekBarWrapper = document.querySelector('.seek-bar-wrapper');
+let _isSeeking = false;
+let _seekFlushTimer = null;
+
+function _getSeekFraction(clientX) {
+    const rect = seekBarWrapper.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+}
+
+// Update UI instantly; send WS at most every 150ms during drag, always on release.
+function _doSeek(fraction, final = false) {
+    if (!seekBarWrapper || seekDuration <= 0) return;
+    const seekTo = Math.round(fraction * seekDuration);
+    updateSeekBar(seekTo, seekDuration);
+
+    if (final) {
+        if (_seekFlushTimer) { clearTimeout(_seekFlushTimer); _seekFlushTimer = null; }
+        syncClient.send('control', { action: 'seek', seekTo });
+    } else if (!_seekFlushTimer) {
+        _seekFlushTimer = setTimeout(() => {
+            _seekFlushTimer = null;
+            syncClient.send('control', { action: 'seek', seekTo });
+        }, 150);
+    }
+}
+
+if (seekBarWrapper) {
+    // --- Mouse ---
+    seekBarWrapper.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        _isSeeking = true;
+        seekBarWrapper.classList.add('seeking');
+        stopSeekTick();
+        _doSeek(_getSeekFraction(e.clientX));
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!_isSeeking) return;
+        _doSeek(_getSeekFraction(e.clientX));
+    });
+
+    document.addEventListener('mouseup', (e) => {
+        if (!_isSeeking) return;
+        _isSeeking = false;
+        seekBarWrapper.classList.remove('seeking');
+        _doSeek(_getSeekFraction(e.clientX), true);
+        if (seekDuration > 0) startSeekTick();
+    });
+
+    // --- Touch ---
+    seekBarWrapper.addEventListener('touchstart', (e) => {
+        _isSeeking = true;
+        seekBarWrapper.classList.add('seeking');
+        stopSeekTick();
+        _doSeek(_getSeekFraction(e.touches[0].clientX));
+    }, { passive: true });
+
+    document.addEventListener('touchmove', (e) => {
+        if (!_isSeeking) return;
+        _doSeek(_getSeekFraction(e.touches[0].clientX));
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => {
+        if (!_isSeeking) return;
+        _isSeeking = false;
+        seekBarWrapper.classList.remove('seeking');
+        // Send final position (already set by last touchmove)
+        if (_seekFlushTimer) { clearTimeout(_seekFlushTimer); _seekFlushTimer = null; }
+        syncClient.send('control', { action: 'seek', seekTo: seekCurrentTime });
+        if (seekDuration > 0) startSeekTick();
+    });
 }
 
 // ===================== QR =====================

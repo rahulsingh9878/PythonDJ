@@ -148,11 +148,13 @@ async def websocket_sync_hub(
             # ----------------------------------------------------------------
             # play – smart play + radio queue
             # ----------------------------------------------------------------
+            # play – smart play + radio queue
+            # ----------------------------------------------------------------
             elif msg_type == "play":
-                video_id = msg_data.get("videoId")
-                query = msg_data.get("query", "")
-                limit = int(msg_data.get("limit", 50))
-                max_vol = int(msg_data.get("maxVol", 100))
+                video_id   = msg_data.get("videoId")
+                query      = msg_data.get("query", "")
+                limit      = int(msg_data.get("limit", 50))
+                max_vol    = int(msg_data.get("maxVol", 100))
                 music_type = msg_data.get("music_type", "songs")
 
                 if video_id:
@@ -164,7 +166,8 @@ async def websocket_sync_hub(
                         music_type=music_type,
                         dj_mode=bool(msg_data.get("dj_mode", True)),
                     )
-                    # Forward the play command to all players in the room
+                    msg_data["timestamp"] = context["timestamp"]
+                    await _broadcast_controllers("heatmap", context.get("heatmap_data", {}))
                     await _broadcast({"type": "play", "data": msg_data}, target_role="player")
                 else:
                     context = await music_service.perform_search(
@@ -222,7 +225,7 @@ async def websocket_sync_hub(
             elif msg_type == "suggest":
                 query = msg_data.get("query", "")
                 if query:
-                    suggestions = music_service.get_suggestions(query)
+                    suggestions = await music_service.get_suggestions(query)
                     await websocket.send_json(
                         {"type": "suggestions", "data": {"suggestions": suggestions}}
                     )

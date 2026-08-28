@@ -123,9 +123,9 @@ async def search_endpoint(
 
 
 @router.get("/suggestions/", response_model=SuggestionsResponse)
-def get_search_suggestions(query: str = Query(..., min_length=1)):
+async def get_search_suggestions(query: str = Query(..., min_length=1)):
     """Return autocomplete suggestions for *query*."""
-    suggestions = music_service.get_suggestions(query)
+    suggestions = await music_service.get_suggestions(query)
     return {"suggestions": suggestions}
 
 

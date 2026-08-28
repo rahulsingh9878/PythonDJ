@@ -20,8 +20,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .api import endpoints, websocket_routes
+from .core.cache import create_cache, make_key
 from .core.config import settings
 from .core.logging import setup_logging
+from .core.state import app_state
 from .services.music_service import music_service
 
 
@@ -35,9 +37,27 @@ async def lifespan(app: FastAPI):
     """
     # --- Startup ---
     setup_logging(settings.log_level)
+
+    cache = await create_cache(settings.redis_url)
+    music_service.set_cache(cache)
+
+    # Restore player context + queue from the previous session (if available).
+    saved_context = await cache.get(make_key("player", "context"))
+    if saved_context:
+        app_state.player_context.update(saved_context)
+        tracks = saved_context.get("tracks", [])
+        if tracks:
+            app_state.out_tracks.extend(tracks)
+            import logging
+            logging.getLogger(__name__).info(
+                "Player state restored from Redis – %d tracks in queue", len(tracks)
+            )
+
     await music_service.initialize()
     yield
-    # --- Shutdown (add cleanup here if needed in the future) ---
+
+    # --- Shutdown ---
+    await cache.close()
 
 
 def create_app() -> FastAPI:

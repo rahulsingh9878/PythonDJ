@@ -9,6 +9,7 @@ anonymous sessions.
 
 import asyncio
 import copy
+import hashlib
 import logging
 import random
 import time
@@ -19,6 +20,7 @@ import requests
 import yt_dlp
 from ytmusicapi import YTMusic
 
+from ..core.cache import CacheBackend, NullCache, make_key
 from ..core.config import settings
 from ..core.state import app_state
 from ..utils.helpers import find_video_id
@@ -78,7 +80,6 @@ def _best_thumbnail(thumbnails) -> str:
     if not thumbnails:
         return ""
 
-    # Some results wrap thumbnails in a second list
     if (
         isinstance(thumbnails, list)
         and thumbnails
@@ -99,7 +100,6 @@ def _best_thumbnail(thumbnails) -> str:
     elif isinstance(thumbnails, dict):
         url = thumbnails.get("url", "")
 
-    # Upgrade Google-hosted thumbnails to 512 px
     if url and "googleusercontent.com" in url:
         base = url.split("=")[0] if "=" in url else url.split("-s")[0]
         url = f"{base}=w512-h512-l90-rj"
@@ -125,20 +125,68 @@ def _clean_suggestions(raw: list) -> List[str]:
     return result
 
 
+def _query_hash(query: str) -> str:
+    """Short stable hash of a search query for use in cache keys."""
+    return hashlib.md5(query.lower().strip().encode()).hexdigest()[:12]
+
+
 class MusicService:
     def __init__(self) -> None:
         self.yt = YTMusic()
-        # Share the same YTMusic instance with the recommender
         self.recommender = AsyncIndianMusicRecommender(yt=self.yt)
+        self._cache: CacheBackend = NullCache()
+
+    # ------------------------------------------------------------------
+    # Cache injection (called once from main.py lifespan)
+    # ------------------------------------------------------------------
+
+    def set_cache(self, cache: CacheBackend) -> None:
+        self._cache = cache
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
-        """Kick off the background database build at startup."""
-        asyncio.create_task(self.recommender.build_all_collections())
+        """Kick off the recommender warm-start as a background task."""
+        asyncio.create_task(self._build_recommender())
         logger.info("MusicService initialised – recommender building in background")
+
+    async def _build_recommender(self) -> None:
+        """
+        Redis-first recommender warm-start.
+
+        1. Try to load the music_database from Redis (fast path — avoids 40+ API calls).
+        2. On cache miss, run the full build then persist the result.
+        """
+        cache_key = make_key("recommender", "db")
+        cached_db = await self._cache.get(cache_key)
+
+        if cached_db is not None:
+            self.recommender.music_database = cached_db
+            total = sum(len(v) for v in cached_db.values())
+            logger.info(
+                "Recommender DB loaded from Redis – %d songs across %d categories",
+                total,
+                len(cached_db),
+            )
+            return
+
+        # Cold start — fetch from YouTube Music
+        await self.recommender.build_all_collections()
+
+        # Persist so the next restart is instant
+        await self._cache.set(
+            cache_key,
+            self.recommender.music_database,
+            settings.redis_recommender_ttl,
+        )
+        total = sum(len(v) for v in self.recommender.music_database.values())
+        logger.info(
+            "Recommender DB persisted to Redis – %d songs, ttl=%ds",
+            total,
+            settings.redis_recommender_ttl,
+        )
 
     # ------------------------------------------------------------------
     # Low-level YTMusic wrappers
@@ -161,14 +209,28 @@ class MusicService:
     def _search(self, query: str, filter_type: str = "songs", limit: int = 3) -> list:
         return self.yt.search(query, filter=filter_type, limit=limit)
 
-    def get_suggestions(self, query: str) -> List[str]:
-        """Return deduplicated search-suggestion strings."""
+    # ------------------------------------------------------------------
+    # Suggestions (async — cached)
+    # ------------------------------------------------------------------
+
+    async def get_suggestions(self, query: str) -> List[str]:
+        """Return deduplicated search-suggestion strings, cached for 5 minutes."""
+        cache_key = make_key("suggestions", _query_hash(query))
+        cached = await self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug("Cache HIT get_suggestions query='%s'", query)
+            return cached
+
         try:
-            raw = self.yt.get_search_suggestions(query)
-            return _clean_suggestions(raw)
+            loop = asyncio.get_running_loop()
+            raw = await loop.run_in_executor(None, self.yt.get_search_suggestions, query)
+            result = _clean_suggestions(raw)
         except Exception as exc:
             logger.warning("Suggestions failed for '%s': %s", query, exc)
             return []
+
+        await self._cache.set(cache_key, result, settings.redis_suggestions_ttl)
+        return result
 
     # ------------------------------------------------------------------
     # Result processing
@@ -204,7 +266,6 @@ class MusicService:
             artists = t.get("artists", [])
             artist_name = artists[0]["name"] if artists else ""
 
-            # --- Label detection ---
             title_lower = title.lower()
             labels: List[str] = []
             if any(
@@ -230,7 +291,6 @@ class MusicService:
             if "mashup" in title_lower:
                 labels.append("Mashup")
 
-            # --- Sort weight ---
             weight = 0
             if "Official" in labels:
                 weight += 10
@@ -278,7 +338,6 @@ class MusicService:
           1. YouTube Music (free, using browseId when available)
           2. RapidAPI / Musixmatch (requires RAPIDAPI_KEY env var)
         """
-        # 1. YouTube Music
         if browseId:
             try:
                 logger.debug("Fetching YT lyrics browseId=%s", browseId)
@@ -295,7 +354,6 @@ class MusicService:
             except Exception as exc:
                 logger.warning("YT lyrics failed browseId=%s: %s", browseId, exc)
 
-        # 2. RapidAPI fallback
         if not settings.rapidapi_key:
             return {
                 "status": 404,
@@ -311,7 +369,7 @@ class MusicService:
             "x-rapidapi-host": settings.rapidapi_host,
         }
 
-        time.sleep(delay)  # Respect rate limits (safe: sync endpoint runs in threadpool)
+        time.sleep(delay)
 
         try:
             logger.debug("RapidAPI lyrics fallback title='%s'", title)
@@ -351,6 +409,18 @@ class MusicService:
     ) -> Dict[str, Any]:
         from ..services.connection_manager import manager
 
+        # Stateful operations bypass cache — they depend on current queue state.
+        use_cache = not nextPlay and not refresh
+        cache_key = make_key("search", _query_hash(query), limit)
+
+        if use_cache:
+            cached = await self._cache.get(cache_key)
+            if cached is not None:
+                logger.debug("Cache HIT perform_search query='%s'", query)
+                return await self._build_search_context(
+                    query, cached["song_tracks"], cached["video_tracks"], limit, maxVol, music_type
+                )
+
         target_id: Optional[str] = None
         exclude_title: Optional[str] = None
 
@@ -374,7 +444,6 @@ class MusicService:
                     }
                 )
 
-        # Parallel song + video search
         loop = asyncio.get_running_loop()
         with ThreadPoolExecutor(max_workers=2) as pool:
             song_future = pool.submit(self._search, query, "songs", limit)
@@ -397,6 +466,28 @@ class MusicService:
             song_tracks = self._reorder_for_selection(song_tracks, target_id, query, refresh)
             video_tracks = self._reorder_for_selection(video_tracks, target_id, query, refresh)
 
+        if use_cache:
+            await self._cache.set(
+                cache_key,
+                {"song_tracks": song_tracks, "video_tracks": video_tracks},
+                settings.redis_search_ttl,
+            )
+            logger.debug("Cache SET perform_search query='%s' ttl=%ds", query, settings.redis_search_ttl)
+
+        return await self._build_search_context(
+            query, song_tracks, video_tracks, limit, maxVol, music_type
+        )
+
+    async def _build_search_context(
+        self,
+        query: str,
+        song_tracks: List[Dict],
+        video_tracks: List[Dict],
+        limit: int,
+        maxVol: int,
+        music_type: str,
+    ) -> Dict[str, Any]:
+        """Assemble final context, update app_state, and sync player context."""
         new_tracks = song_tracks + video_tracks
         for idx, t in enumerate(new_tracks):
             t["index"] = idx
@@ -413,7 +504,7 @@ class MusicService:
             "maxVol": maxVol,
             "music_type": music_type,
         }
-        self._sync_player_context(context)
+        await self._sync_player_context(context)
         return context
 
     def _reorder_for_selection(
@@ -480,22 +571,34 @@ class MusicService:
         2. Fire radio logic in the background to populate the queue.
         dj_mode=True: timestamp derived from heatmap peak. False: default 20s.
         """
-        from ..services.connection_manager import player_broadcaster
+        from ..services.connection_manager import player_broadcaster, webapp_broadcaster
 
-        if dj_mode:
-            peaks = await self.get_heatmap_peaks(video_id)
-            if peaks:
-                ts = int(peaks[0]["midpoint"]) - 7
-                timestamp = ts if ts >= 0 else 20
-            else:
-                timestamp = 20
+        heatmap_data = await self._get_heatmap_data(video_id)
+        peaks = heatmap_data.get("peaks", [])
+        raw_heatmap = heatmap_data.get("heatmap", [])
+        # print(f"DEBUG: play_and_populate video_id={video_id} peaks={peaks}, raw_heatmap_length={len(raw_heatmap)}")
+        if dj_mode and peaks:
+            ts = int(peaks[0]["midpoint"]) - 7
+            timestamp = ts if ts >= 0 else 20
         else:
             timestamp = 20
 
-        await player_broadcaster.send(
-            "play",
-            {"videoId": video_id, "title": title, "timestamp": timestamp},
-        )
+        # Broadcast compact heatmap to controllers for visualization.
+        # Send only the values array + step size — avoids sending start_time/end_time
+        # for every segment (~9 KB → ~800 bytes), preventing EAGAIN on the socket buffer.
+        if raw_heatmap:
+            print(f"DEBUG: broadcasting heatmap for video_id={video_id} segments and {len(peaks)} peaks")
+            try:
+                step = round(raw_heatmap[0]["end_time"] - raw_heatmap[0]["start_time"], 3)
+                heatmap_data = {
+                    "videoId": video_id,
+                    "values": [round(s["value"], 3) for s in raw_heatmap],
+                    "step": step,
+                    "peaks": [round(p["midpoint"], 1) for p in peaks],}
+                
+            except Exception as exc:
+                print(f"DEBUG: Heatmap broadcast failed for {video_id}: {peaks}")
+                logger.warning("Heatmap broadcast failed for %s: %s", video_id, exc)
 
         radio_result = await self.start_radio(video_id=video_id, limit=limit)
 
@@ -508,7 +611,9 @@ class MusicService:
             "maxVol": maxVol,
             "music_type": music_type,
         }
-        self._sync_player_context(context)
+        await self._sync_player_context(context)
+        context["timestamp"] = timestamp
+        context["heatmap_data"] = heatmap_data
         return context
 
     # ------------------------------------------------------------------
@@ -524,6 +629,14 @@ class MusicService:
         Resolves the seed to its Official Music Video and audio counterparts,
         then fetches two watch playlists in parallel for maximum variety.
         """
+        cache_key = make_key("radio", video_id, limit)
+        cached = await self._cache.get(cache_key)
+        if cached is not None:
+            logger.debug("Cache HIT start_radio video_id=%s", video_id)
+            return await self._build_radio_context(
+                cached["song_tracks"], cached["video_tracks"], limit
+            )
+
         loop = asyncio.get_running_loop()
 
         def _resolve_ids(original_id: str) -> Dict[str, str]:
@@ -596,6 +709,22 @@ class MusicService:
             raw_audio.get("tracks", []), "song", "Radio Mix"
         )
 
+        await self._cache.set(
+            cache_key,
+            {"song_tracks": song_tracks, "video_tracks": video_tracks},
+            settings.redis_radio_ttl,
+        )
+        logger.debug("Cache SET start_radio video_id=%s ttl=%ds", video_id, settings.redis_radio_ttl)
+
+        return await self._build_radio_context(song_tracks, video_tracks, limit)
+
+    async def _build_radio_context(
+        self,
+        song_tracks: List[Dict],
+        video_tracks: List[Dict],
+        limit: int,
+    ) -> Dict[str, Any]:
+        """Assemble final context, update app_state, and sync player context."""
         final_list = song_tracks + video_tracks
         for i, t in enumerate(final_list):
             t["index"] = i
@@ -612,27 +741,27 @@ class MusicService:
             "maxVol": app_state.player_context.get("maxVol", 100),
             "status": "success",
         }
-        self._sync_player_context(context)
+        await self._sync_player_context(context)
         return context
 
     # ------------------------------------------------------------------
     # Heatmap peaks
     # ------------------------------------------------------------------
 
-    async def get_heatmap_peaks(
-        self,
-        video_id: str,
-        min_value: float = 0.5,
-        min_gap_seconds: float = 30.0,
-        window: int = 3,
-    ) -> List[Dict]:
+    async def _get_heatmap_data(self, video_id: str) -> Dict[str, Any]:
         """
-        Fetch the YouTube heatmap for *video_id* via yt-dlp and return
-        its local maxima sorted by engagement value (highest first).
+        Fetch and cache the full YouTube heatmap for *video_id*.
 
-        Each returned dict has: start_time, end_time, value, midpoint.
-        Returns an empty list when no heatmap data is available.
+        Cached payload: {"heatmap": [raw segments], "peaks": [detected peaks]}
+        This lets callers access both the raw engagement curve (for plotting)
+        and the peak timestamps (for DJ seek) from a single Redis entry.
         """
+        cache_key = make_key("heatmap", video_id)
+        cached = await self._cache.get(cache_key)
+        if cached is not None and isinstance(cached, dict):
+            logger.debug("Cache HIT _get_heatmap_data video_id=%s", video_id)
+            return cached
+
         url = f"https://www.youtube.com/watch?v={video_id}"
         ydl_opts = {"quiet": True, "skip_download": True}
 
@@ -643,24 +772,66 @@ class MusicService:
 
         loop = asyncio.get_running_loop()
         try:
-            heatmap = await loop.run_in_executor(None, _fetch)
+            raw_heatmap = await loop.run_in_executor(None, _fetch)
         except Exception as exc:
             logger.warning("yt-dlp heatmap fetch failed for %s: %s", video_id, exc)
-            return []
+            return {"heatmap": [], "peaks": []}
 
-        if not heatmap:
-            return []
+        if not raw_heatmap:
+            return {"heatmap": [], "peaks": []}
 
-        return _find_peaks(heatmap, min_value, min_gap_seconds, window)
+        peaks = _find_peaks(raw_heatmap)
+        data = {"heatmap": raw_heatmap, "peaks": peaks}
+
+        await self._cache.set(cache_key, data, settings.redis_heatmap_ttl)
+        logger.debug("Cache SET heatmap video_id=%s segments=%d peaks=%d ttl=%ds",
+                     video_id, len(raw_heatmap), len(peaks), settings.redis_heatmap_ttl)
+        return data
+
+    async def get_heatmap_peaks(
+        self,
+        video_id: str,
+        min_value: float = 0.5,
+        min_gap_seconds: float = 30.0,
+        window: int = 3,
+    ) -> List[Dict]:
+        """
+        Return heatmap peaks for *video_id* sorted by engagement (highest first).
+
+        Uses _get_heatmap_data for the cached raw heatmap, then re-computes
+        peaks if non-default params are passed (no extra HTTP call needed).
+        Each peak has: start_time, end_time, value, midpoint.
+        """
+        data = await self._get_heatmap_data(video_id)
+        raw = data.get("heatmap", [])
+        if not raw:
+            return []
+        # Default params → return cached peaks; custom params → recompute from raw
+        using_defaults = (min_value == 0.5 and min_gap_seconds == 30.0 and window == 3)
+        if using_defaults:
+            return data.get("peaks", [])
+        return _find_peaks(raw, min_value, min_gap_seconds, window)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _sync_player_context(self, context: Dict[str, Any]) -> None:
-        """Keep app_state.player_context in sync after every operation."""
+    async def _sync_player_context(self, context: Dict[str, Any]) -> None:
+        """
+        Keep app_state.player_context in sync after every operation, and
+        persist it to Redis so the queue survives a server restart.
+
+        The `tracks` key inside context is a live reference to app_state.out_tracks;
+        deepcopy ensures the stored snapshot is independent of future mutations.
+        """
         app_state.player_context.clear()
         app_state.player_context.update(copy.deepcopy(context))
+
+        await self._cache.set(
+            make_key("player", "context"),
+            app_state.player_context,
+            settings.redis_player_ttl,
+        )
 
 
 # ---------------------------------------------------------------------------
