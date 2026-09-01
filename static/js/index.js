@@ -25,16 +25,34 @@ function handleImageError(img, videoId) {
 }
 
 // --- DJ Mode ---
+let peakMode = localStorage.getItem('peakMode') || 'best'; // 'best' | 'first'
+
 function toggleDJMode() {
     djMode = !djMode;
     localStorage.setItem('djMode', djMode);
     const btn = document.getElementById('djToggleBtn');
     if (btn) btn.classList.toggle('active', djMode);
+    _syncPeakModeBtn();
+}
+
+function togglePeakMode() {
+    peakMode = peakMode === 'best' ? 'first' : 'best';
+    localStorage.setItem('peakMode', peakMode);
+    _syncPeakModeBtn();
+}
+
+function _syncPeakModeBtn() {
+    const btn = document.getElementById('peakModeBtn');
+    const label = document.getElementById('peakModeLabel');
+    if (!btn || !label) return;
+    btn.style.display = djMode ? 'flex' : 'none';
+    label.textContent = peakMode === 'first' ? 'First' : 'Best';
 }
 
 function initDJToggle() {
     const btn = document.getElementById('djToggleBtn');
     if (btn) btn.classList.toggle('active', djMode);
+    _syncPeakModeBtn();
 }
 
 window.addEventListener('DOMContentLoaded', initDJToggle);
@@ -662,7 +680,8 @@ function playTrackFromItem(item) {
         music_type: document.getElementById('musicTypeInput').value || 'videos',
         nextPlay: true,
         refresh: false,
-        dj_mode: djMode
+        dj_mode: djMode,
+        peak_mode: peakMode
     });
 
     if (queryInput) queryInput.value = title;

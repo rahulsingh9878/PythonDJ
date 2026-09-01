@@ -143,6 +143,27 @@ body {
     50%       { box-shadow: 0 0 16px rgba(255, 0, 0, 0.45); }
 }
 
+/* --- Peak Mode Button --- */
+.peak-mode-btn {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--primary);
+    background: rgba(255, 0, 0, 0.08);
+    color: var(--primary);
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-main);
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: all 0.2s ease;
+}
+
+.peak-mode-btn:hover {
+    background: rgba(255, 0, 0, 0.18);
+}
+
 /* --- Search & Toggles --- */
 .search-section {
     padding: 0 16px;

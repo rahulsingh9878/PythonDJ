@@ -74,6 +74,8 @@ async def search_endpoint(
     music_type: str = Form("songs"),
     videoId: Optional[str] = Form(None),
     refresh: bool = Form(False),
+    dj_mode: bool = Form(True),
+    peak_mode: str = Form("best"),
 ):
     """
     Search YouTube Music (songs + videos, parallel) and return results.
@@ -99,6 +101,8 @@ async def search_endpoint(
                 limit=limit,
                 maxVol=maxVol,
                 music_type=music_type,
+                dj_mode=dj_mode,
+                peak_mode=peak_mode,
             )
         else:
             context = await music_service.perform_search(

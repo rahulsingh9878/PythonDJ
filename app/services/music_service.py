@@ -565,20 +565,26 @@ class MusicService:
         maxVol: int = 100,
         music_type: str = "songs",
         dj_mode: bool = True,
+        peak_mode: str = "best",
     ) -> Dict[str, Any]:
         """
         1. Immediately broadcast a `play` command to the Player.
         2. Fire radio logic in the background to populate the queue.
         dj_mode=True: timestamp derived from heatmap peak. False: default 20s.
+        peak_mode="best": seek to highest-engagement peak.
+        peak_mode="first": seek to earliest peak chronologically.
         """
         from ..services.connection_manager import player_broadcaster, webapp_broadcaster
 
         heatmap_data = await self._get_heatmap_data(video_id)
         peaks = heatmap_data.get("peaks", [])
         raw_heatmap = heatmap_data.get("heatmap", [])
-        # print(f"DEBUG: play_and_populate video_id={video_id} peaks={peaks}, raw_heatmap_length={len(raw_heatmap)}")
         if dj_mode and peaks:
-            ts = int(peaks[0]["midpoint"]) - 7
+            if peak_mode == "first":
+                chosen_peak = min(peaks, key=lambda p: p["midpoint"])
+            else:
+                chosen_peak = peaks[0]  # already sorted by value desc
+            ts = int(chosen_peak["midpoint"]) - 7
             timestamp = ts if ts >= 0 else 20
         else:
             timestamp = 20

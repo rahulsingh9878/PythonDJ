@@ -165,6 +165,7 @@ async def websocket_sync_hub(
                         maxVol=max_vol,
                         music_type=music_type,
                         dj_mode=bool(msg_data.get("dj_mode", True)),
+                        peak_mode=msg_data.get("peak_mode", "best"),
                     )
                     msg_data["timestamp"] = context["timestamp"]
                     await _broadcast_controllers("heatmap", context.get("heatmap_data", {}))
