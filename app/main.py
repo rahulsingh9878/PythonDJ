@@ -19,12 +19,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import endpoints, websocket_routes
+from .api import endpoints, websocket_routes, wled_routes
 from .core.cache import create_cache, make_key
 from .core.config import settings
 from .core.logging import setup_logging
 from .core.state import app_state
 from .services.music_service import music_service
+from .services.wled import catalog as wled_catalog
+from .services.wled.controller import wled_controller
 
 
 @asynccontextmanager
@@ -40,6 +42,7 @@ async def lifespan(app: FastAPI):
 
     cache = await create_cache(settings.redis_url)
     music_service.set_cache(cache)
+    await wled_catalog.load(cache)
 
     # Restore player context + queue from the previous session (if available).
     saved_context = await cache.get(make_key("player", "context"))
@@ -57,6 +60,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # --- Shutdown ---
+    await wled_controller.aclose()
     await cache.close()
 
 
@@ -86,6 +90,7 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
     app.include_router(endpoints.router, tags=["Music API"])
     app.include_router(websocket_routes.router, tags=["WebSocket"])
+    app.include_router(wled_routes.router, tags=["WLED"])
 
     # ------------------------------------------------------------------
     # Static files

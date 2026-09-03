@@ -6,6 +6,7 @@ request-parsing / response-shaping wrappers.
 """
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request
@@ -21,6 +22,7 @@ from ..models.responses import (
     TrackLyricsResponse,
 )
 from ..services.music_service import music_service
+from ..services.wled import catalog as wled_catalog
 from ..utils.helpers import detect_verses, generate_qr_base64
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,23 @@ templates = Jinja2Templates(directory="templates")
 # Helper
 # ---------------------------------------------------------------------------
 
+_STATIC_DIR = Path("static")
+
+
+def _asset_version() -> int:
+    """
+    Cache-busting token appended to the JS/CSS URLs so a browser (often a
+    phone controller with no easy hard-refresh) can't keep serving a stale
+    cached copy after either file changes on disk.
+    """
+    try:
+        js_mtime = (_STATIC_DIR / "js" / "index.js").stat().st_mtime
+        css_mtime = (_STATIC_DIR / "css" / "index.css").stat().st_mtime
+        return int(max(js_mtime, css_mtime))
+    except OSError:
+        return 0
+
+
 def _template_context(request: Request, overrides: dict = None) -> dict:
     """
     Build the Jinja2 template context from current player state.
@@ -47,6 +66,16 @@ def _template_context(request: Request, overrides: dict = None) -> dict:
     """
     ctx = dict(app_state.player_context)
     ctx["request"] = request
+    ctx["asset_version"] = _asset_version()
+    ctx["wled_palettes"] = [
+        {
+            "name": name,
+            "gradient": wled_catalog.palette_gradient(i),
+            "markers": wled_catalog.palette_color_markers(i),
+        }
+        for i, name in enumerate(wled_catalog.PALETTES)
+    ]
+    ctx["wled_effects"] = sorted(wled_catalog.usable_effects(), key=lambda e: e["name"].lower())
     if "music_type" not in ctx:
         ctx["music_type"] = "songs"
     if overrides:

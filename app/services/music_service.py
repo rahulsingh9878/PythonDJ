@@ -25,6 +25,7 @@ from ..core.config import settings
 from ..core.state import app_state
 from ..utils.helpers import find_video_id
 from .recommender_system import AsyncIndianMusicRecommender
+from .wled.controller import wled_controller
 
 logger = logging.getLogger(__name__)
 
@@ -588,6 +589,14 @@ class MusicService:
             timestamp = ts if ts >= 0 else 20
         else:
             timestamp = 20
+
+        # New song → (re)drive WLED's effect speed from this heatmap, starting
+        # at the same position the player is about to seek to. No-op when
+        # WLED isn't configured or this video has no heatmap. `peaks` (already
+        # computed above for the DJ-mode seek target) is reused so the
+        # club-light effect rotation fires at the exact same moments the app
+        # already considers "peaks" — no separate peak-detection pass needed.
+        await wled_controller.start(video_id, raw_heatmap, start_at=timestamp, peaks=peaks)
 
         # Broadcast compact heatmap to controllers for visualization.
         # Send only the values array + step size — avoids sending start_time/end_time

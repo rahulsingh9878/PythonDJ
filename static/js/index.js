@@ -89,6 +89,8 @@ if (queryInput && searchBox) {
 
 function toggleSearch() {
     if (!searchBox) return;
+    const wledView = document.getElementById('wledView');
+    if (wledView && wledView.style.display !== 'none') showHomeTab();
     if (!searchBox.classList.contains('visible')) {
         if (queryInput) { queryInput.value = ''; toggleClearBtn(); }
     }
@@ -188,6 +190,8 @@ async function startRadio(videoId) {
 
 // ===================== Charts =====================
 async function fetchCharts() {
+    const wledView = document.getElementById('wledView');
+    if (wledView && wledView.style.display !== 'none') showHomeTab();
     document.body.classList.add('searching');
     try {
         const res = await fetch('/charts/?country=IN');
@@ -351,6 +355,47 @@ class DJSyncClient {
                 break;
             case 'heatmap':
                 renderHeatmap(data.values, data.step, data.peaks);
+                break;
+            case 'power_state':
+                if (data && 'on' in data) {
+                    const t = document.getElementById('wledPowerToggle');
+                    if (t) t.checked = data.on;
+                }
+                break;
+            case 'brightness_state':
+                if (data && 'value' in data) {
+                    const s = document.getElementById('wledBrightnessSlider');
+                    if (s) s.value = data.value;
+                }
+                break;
+            case 'color_state':
+                if (data && data.hex) {
+                    const slot = data.slot || 0;
+                    colorSlotValues[slot] = data.hex;
+                    if (slot === selectedColorSlot) {
+                        const c = document.getElementById('wledColorPicker');
+                        if (c) c.value = data.hex;
+                    }
+                    regenerateMarkerSwatches();
+                }
+                break;
+            case 'sync_state':
+                if (data && 'on' in data) {
+                    const t = document.getElementById('wledClubSyncToggle');
+                    if (t) t.checked = data.on;
+                }
+                break;
+            case 'peakfx_state':
+                if (data && 'on' in data) {
+                    const t = document.getElementById('wledPeakFxToggle');
+                    if (t) t.checked = data.on;
+                }
+                break;
+            case 'palette_state':
+                if (data && data.palette) setActivePaletteUI(data.palette);
+                break;
+            case 'effect_state':
+                if (data && data.effect) setActiveEffectUI(data.effect);
                 break;
             case 'control':
                 this.handleControl(data);
@@ -844,6 +889,252 @@ function openRoomPanel() {
 function closeRoomPanel() {
     document.getElementById('roomPanel').classList.remove('active');
     document.getElementById('roomPanelOverlay').classList.remove('active');
+}
+
+// ===================== WLED Tab =====================
+function showWledTab() {
+    document.querySelector('.search-section').style.display = 'none';
+    document.querySelector('.results-meta').style.display = 'none';
+    document.getElementById('tracksList').style.display = 'none';
+    document.getElementById('wledView').style.display = 'block';
+    document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
+    document.getElementById('wledNavBtn').classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function showHomeTab() {
+    document.querySelector('.search-section').style.display = '';
+    document.querySelector('.results-meta').style.display = '';
+    document.getElementById('tracksList').style.display = '';
+    document.getElementById('wledView').style.display = 'none';
+    document.querySelectorAll('.nav-item').forEach((n) => n.classList.remove('active'));
+    const homeNav = document.querySelector('.nav-item[href="/"]');
+    if (homeNav) homeNav.classList.add('active');
+}
+
+const wledPowerToggle = document.getElementById('wledPowerToggle');
+if (wledPowerToggle) {
+    wledPowerToggle.addEventListener('change', () => {
+        const on = wledPowerToggle.checked;
+        syncClient.send('power', { on });
+        showToast(on ? 'WLED: On' : 'WLED: Off');
+    });
+}
+
+const wledBrightnessSlider = document.getElementById('wledBrightnessSlider');
+if (wledBrightnessSlider) {
+    let brightnessDebounce = null;
+    wledBrightnessSlider.addEventListener('input', () => {
+        const value = parseInt(wledBrightnessSlider.value, 10);
+        clearTimeout(brightnessDebounce);
+        brightnessDebounce = setTimeout(() => {
+            syncClient.send('brightness', { value });
+        }, 150);
+    });
+}
+
+const wledColorPicker = document.getElementById('wledColorPicker');
+let selectedColorSlot = 0;
+const colorSlotValues = { 0: '#ff0000', 1: '#000000', 2: '#000000' };
+
+// "Structural" palettes (Random Cycle, Color 1, Colors 1&2, Color Gradient,
+// Colors Only) render from the segment's own colors, not a fixed gradient —
+// rebuild their swatch preview from whatever's currently picked, same as
+// WLED's own UI does (its redrawPalPrev()).
+const RAINBOW_GRADIENT = 'linear-gradient(to right, red, orange, #ff0, green, #00f, purple)';
+const COLOR_SLOT_FOR_MARKER = { c1: 0, c2: 1, c3: 2 };
+
+function regenerateMarkerSwatches() {
+    document.querySelectorAll('.palette-chip[data-markers]').forEach((chip) => {
+        let markers;
+        try { markers = JSON.parse(chip.dataset.markers); } catch (e) { return; }
+        const swatch = chip.querySelector('.palette-swatch');
+        if (!swatch || !markers || !markers.length) return;
+
+        if (markers[0] === 'r') {
+            swatch.style.background = RAINBOW_GRADIENT;
+            return;
+        }
+        const colors = markers.map((m) => colorSlotValues[COLOR_SLOT_FOR_MARKER[m]] || '#000000');
+        if (colors.length === 1) {
+            swatch.style.background = colors[0];
+            return;
+        }
+        const stops = colors.map((c, i) => `${c} ${Math.round((i / (colors.length - 1)) * 100)}%`);
+        swatch.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+    });
+}
+regenerateMarkerSwatches();
+
+function selectColorSlot(slot) {
+    selectedColorSlot = slot;
+    document.querySelectorAll('.color-slot-option').forEach((btn) => {
+        btn.classList.toggle('active', Number(btn.dataset.slot) === slot);
+    });
+    if (wledColorPicker) wledColorPicker.value = colorSlotValues[slot];
+}
+
+if (wledColorPicker) {
+    let colorDebounce = null;
+    wledColorPicker.addEventListener('input', () => {
+        const hex = wledColorPicker.value;
+        colorSlotValues[selectedColorSlot] = hex;
+        regenerateMarkerSwatches();
+        clearTimeout(colorDebounce);
+        colorDebounce = setTimeout(() => {
+            syncClient.send('color', { hex, slot: selectedColorSlot });
+        }, 150);
+    });
+}
+
+// ===================== Club Sync =====================
+const wledClubSyncToggle = document.getElementById('wledClubSyncToggle');
+if (wledClubSyncToggle) {
+    wledClubSyncToggle.addEventListener('change', () => {
+        const on = wledClubSyncToggle.checked;
+        syncClient.send('sync', { on });
+        showToast(on ? 'Club Sync: On' : 'Club Sync: Off');
+    });
+}
+
+const wledPeakFxToggle = document.getElementById('wledPeakFxToggle');
+if (wledPeakFxToggle) {
+    wledPeakFxToggle.addEventListener('change', () => {
+        const on = wledPeakFxToggle.checked;
+        syncClient.send('peakfx', { on });
+        showToast(on ? 'Peak FX: On' : 'Peak FX: Off');
+    });
+}
+
+async function resumeAutoSync() {
+    try {
+        const res = await fetch('/wled/sync/resume', { method: 'POST' });
+        if (res.ok) showToast('Auto sync resumed');
+    } catch (err) { console.error('[ClubSync] Resume failed:', err); }
+}
+
+// ===================== Palette Picker =====================
+function setActivePaletteUI(paletteName) {
+    document.querySelectorAll('.palette-chip').forEach(chip => {
+        chip.classList.toggle('active', chip.dataset.palette === paletteName);
+    });
+}
+
+function triggerPalette(name, chipEl) {
+    setActivePaletteUI(name);
+    syncClient.send('palette', { name });
+    if (chipEl) showToast(`Palette: ${name}`);
+}
+
+const paletteGrid = document.getElementById('paletteGrid');
+if (paletteGrid) {
+    paletteGrid.addEventListener('click', (e) => {
+        const chip = e.target.closest('.palette-chip');
+        if (chip) triggerPalette(chip.dataset.palette, chip);
+    });
+}
+
+// ===================== Effect Picker =====================
+function setActiveEffectUI(effectName) {
+    document.querySelectorAll('.effect-chip').forEach(chip => {
+        chip.classList.toggle('active', chip.dataset.effect === effectName);
+    });
+}
+
+function triggerEffect(name, chipEl) {
+    setActiveEffectUI(name);
+    syncClient.send('effect', { name });
+    if (chipEl) showToast(`Effect: ${name}`);
+    loadEffectControls(name);
+}
+
+const effectGrid = document.getElementById('effectGrid');
+if (effectGrid) {
+    effectGrid.addEventListener('click', (e) => {
+        const chip = e.target.closest('.effect-chip');
+        if (chip) triggerEffect(chip.dataset.effect, chip);
+    });
+}
+
+// ===================== Effect Search / Sort =====================
+const effectSearchInput = document.getElementById('effectSearchInput');
+if (effectSearchInput && effectGrid) {
+    effectSearchInput.addEventListener('input', () => {
+        const q = effectSearchInput.value.trim().toLowerCase();
+        effectGrid.querySelectorAll('.effect-chip').forEach((chip) => {
+            const match = chip.dataset.effect.toLowerCase().includes(q);
+            chip.style.display = match ? '' : 'none';
+        });
+    });
+}
+
+let effectSortMode = 'name';
+function setEffectSort(mode) {
+    if (!effectGrid) return;
+    effectSortMode = mode;
+    document.querySelectorAll('.effect-sort-option').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.sort === mode);
+    });
+
+    const chips = Array.from(effectGrid.querySelectorAll('.effect-chip'));
+    chips.sort((a, b) => {
+        if (mode === 'audio') {
+            const audioDiff = Number(b.dataset.audio) - Number(a.dataset.audio);
+            if (audioDiff !== 0) return audioDiff;
+        }
+        return a.dataset.effect.localeCompare(b.dataset.effect);
+    });
+    chips.forEach((chip) => effectGrid.appendChild(chip));
+}
+
+// ===================== Effect Controls (sx/ix/c1/c2/c3) =====================
+const PARAM_KEYS = ['sx', 'ix', 'c1', 'c2', 'c3'];
+
+async function loadEffectControls(name) {
+    const empty = document.getElementById('effectControlsEmpty');
+    const body = document.getElementById('effectControlsBody');
+    if (!empty || !body) return;
+    try {
+        const res = await fetch(`/wled/effect/${encodeURIComponent(name)}/controls`);
+        if (!res.ok) return;
+        const { labels, defaults } = await res.json();
+
+        let anyShown = false;
+        PARAM_KEYS.forEach((key) => {
+            const row = body.querySelector(`.ec-row[data-param-row="${key}"]`);
+            if (!row) return;
+            const label = labels[key];
+            if (label) {
+                anyShown = true;
+                row.style.display = '';
+                row.querySelector('label').textContent = label;
+                const slider = row.querySelector('input[type="range"]');
+                slider.value = (defaults && defaults[key] !== undefined) ? defaults[key] : 128;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        empty.style.display = anyShown ? 'none' : '';
+        body.style.display = anyShown ? '' : 'none';
+    } catch (err) {
+        console.error('[EffectControls] load failed:', err);
+    }
+}
+
+const effectControlsBody = document.getElementById('effectControlsBody');
+if (effectControlsBody) {
+    const debounceTimers = {};
+    effectControlsBody.addEventListener('input', (e) => {
+        const slider = e.target.closest('input[type="range"]');
+        if (!slider) return;
+        const param = slider.dataset.param;
+        const value = parseInt(slider.value, 10);
+        clearTimeout(debounceTimers[param]);
+        debounceTimers[param] = setTimeout(() => {
+            syncClient.send('params', { [param]: value });
+        }, 150);
+    });
 }
 
 // ===================== RoomClient =====================

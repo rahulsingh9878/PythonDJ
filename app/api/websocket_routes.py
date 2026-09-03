@@ -25,6 +25,7 @@ from ..core.state import app_state
 from ..services.connection_manager import manager, webapp_broadcaster
 from ..services.music_service import music_service
 from ..services.room_manager import room_manager
+from ..services.wled.controller import wled_controller
 from ..utils.helpers import generate_qr_base64
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,12 @@ async def websocket_sync_hub(
                         payload["currentTime"],
                         payload["duration"],
                     )
+                    if payload["videoId"]:
+                        await wled_controller.sync_time(
+                            video_id=payload["videoId"],
+                            current_time=payload["currentTime"],
+                            state=payload["state"],
+                        )
                     await _broadcast({"type": "player_status", "data": payload}, target_role="controller")
                 await websocket.send_json({"type": "pong", "ts": time.time()})
 
@@ -206,8 +213,101 @@ async def websocket_sync_hub(
             # control – play / pause / next / prev
             # ----------------------------------------------------------------
             elif msg_type == "control":
-                logger.debug("Control action=%s", msg_data.get("action"))
+                action = msg_data.get("action")
+                logger.debug("Control action=%s", action)
+
+                if action in ("toggle", "stateChange"):
+                    state = msg_data.get("state")
+                    if state == "paused":
+                        await wled_controller.pause()
+                    elif state == "playing":
+                        await wled_controller.resume()
+                elif action == "seek":
+                    seek_to = msg_data.get("seekTo")
+                    if seek_to is not None:
+                        await wled_controller.seek(float(seek_to))
+
                 await _broadcast({"type": "control", "data": msg_data})
+
+            # ----------------------------------------------------------------
+            # power – turn the WLED strip on/off
+            # ----------------------------------------------------------------
+            elif msg_type == "power":
+                if "on" in msg_data:
+                    applied = await wled_controller.set_power(bool(msg_data["on"]))
+                    if applied:
+                        await _broadcast_controllers("power_state", {"on": bool(msg_data["on"])})
+
+            # ----------------------------------------------------------------
+            # brightness – overall strip brightness
+            # ----------------------------------------------------------------
+            elif msg_type == "brightness":
+                value = msg_data.get("value")
+                if value is not None:
+                    applied = await wled_controller.set_brightness(int(value))
+                    if applied:
+                        await _broadcast_controllers("brightness_state", {"value": int(value)})
+
+            # ----------------------------------------------------------------
+            # color – segment color slot (0/1/2), from the color wheel
+            # ----------------------------------------------------------------
+            elif msg_type == "color":
+                hex_code = (msg_data.get("hex") or "").lstrip("#")
+                slot = msg_data.get("slot", 0)
+                if len(hex_code) == 6 and slot in (0, 1, 2):
+                    try:
+                        r, g, b = (int(hex_code[i:i + 2], 16) for i in (0, 2, 4))
+                    except ValueError:
+                        r = g = b = None
+                    if r is not None:
+                        applied = await wled_controller.set_color(r, g, b, slot)
+                        if applied:
+                            await _broadcast_controllers("color_state", {"hex": f"#{hex_code}", "slot": slot})
+
+            # ----------------------------------------------------------------
+            # sync – turn the heatmap-driven club-light loop on/off
+            # ----------------------------------------------------------------
+            elif msg_type == "sync":
+                if "on" in msg_data:
+                    await wled_controller.set_club_sync(bool(msg_data["on"]))
+                    await _broadcast_controllers("sync_state", {"on": bool(msg_data["on"])})
+
+            # ----------------------------------------------------------------
+            # peakfx – turn effect/palette/color changes at peaks on/off
+            # ----------------------------------------------------------------
+            elif msg_type == "peakfx":
+                if "on" in msg_data:
+                    await wled_controller.set_peak_fx(bool(msg_data["on"]))
+                    await _broadcast_controllers("peakfx_state", {"on": bool(msg_data["on"])})
+
+            # ----------------------------------------------------------------
+            # palette – standalone palette change, independent of the club-sync loop
+            # ----------------------------------------------------------------
+            elif msg_type == "palette":
+                palette_name = msg_data.get("name")
+                if palette_name:
+                    applied = await wled_controller.set_palette(palette_name)
+                    if applied:
+                        await _broadcast_controllers("palette_state", {"palette": palette_name})
+
+            # ----------------------------------------------------------------
+            # effect – standalone effect change (sets a manual override)
+            # ----------------------------------------------------------------
+            elif msg_type == "effect":
+                effect_name = msg_data.get("name")
+                if effect_name:
+                    applied = await wled_controller.set_effect(effect_name)
+                    if applied:
+                        await _broadcast_controllers("effect_state", {"effect": effect_name})
+
+            # ----------------------------------------------------------------
+            # params – live-tweak sx/ix/c1/c2/c3 on the current effect
+            # ----------------------------------------------------------------
+            elif msg_type == "params":
+                if msg_data:
+                    applied = await wled_controller.set_params(msg_data)
+                    if applied:
+                        await _broadcast_controllers("params_state", msg_data)
 
             # ----------------------------------------------------------------
             # qr – generate pairing QR

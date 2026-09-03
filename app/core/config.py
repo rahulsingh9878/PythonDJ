@@ -59,6 +59,19 @@ class Settings(BaseSettings):
     redis_player_ttl: int = 3600     # 1 hour   — queue / context restore after restart
 
     # ------------------------------------------------------------------
+    # WLED (optional) — club-light ambience driven by the YouTube heatmap
+    # ------------------------------------------------------------------
+    wled_ip: str = "192.168.1.12"            # e.g. "192.168.1.12" — empty disables the feature
+    wled_sx_min: int = 40
+    wled_sx_max: int = 255
+    wled_gamma: float = 1.0      # >1 compresses the low end, <1 expands it
+    wled_rate: float = 1.0       # seconds between updates
+    wled_deadband: int = 15      # skip the request if a param moved less than this (visible jump)
+    # Peak-triggered effect/palette/color rotation reuses music_service's own
+    # heatmap peak detection (min_value/min_gap_seconds/window there) — no
+    # separate threshold setting needed here.
+
+    # ------------------------------------------------------------------
     # CORS
     # ------------------------------------------------------------------
     cors_origins: List[str] = [

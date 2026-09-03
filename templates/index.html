@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Music Player - {{ query }}</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/index.css') }}?v={{ asset_version }}">
 </head>
 
 <body>
@@ -180,6 +180,117 @@
                 {% endif %}
             </div>
         </main>
+
+        <!-- WLED Tab -->
+        <section class="wled-view" id="wledView" style="display: none;">
+            <div class="wled-view-header">
+                <h2>WLED</h2>
+                <label class="power-switch">
+                    <input type="checkbox" id="wledPowerToggle" checked>
+                    <span class="power-switch-track"><span class="power-switch-thumb"></span></span>
+                </label>
+            </div>
+
+            <div class="ec-row" id="clubSyncRow">
+                <label>Club Sync</label>
+                <label class="power-switch">
+                    <input type="checkbox" id="wledClubSyncToggle" checked>
+                    <span class="power-switch-track"><span class="power-switch-thumb"></span></span>
+                </label>
+            </div>
+            <p class="wled-hint">Pulses the current effect's speed/intensity with the song's heatmap. Turn off to freeze everything as-is.</p>
+
+            <div class="ec-row" id="peakFxRow">
+                <label>Peak FX</label>
+                <label class="power-switch">
+                    <input type="checkbox" id="wledPeakFxToggle" checked>
+                    <span class="power-switch-track"><span class="power-switch-thumb"></span></span>
+                </label>
+            </div>
+            <p class="wled-hint">Switches to a new random audio-reactive effect, palette, and color at song start and at each heatmap peak — club/bar style. Turn off to keep one look all song.</p>
+
+            <div class="ec-row" id="brightnessRow">
+                <label>Brightness</label>
+                <input type="range" min="1" max="255" value="255" id="wledBrightnessSlider">
+            </div>
+
+            <div class="ec-row" id="colorRow">
+                <label>Color</label>
+                <input type="color" id="wledColorPicker" value="#ff0000">
+                <div class="color-slot-pill" id="colorSlotPill">
+                    <button class="color-slot-option active" data-slot="0" onclick="selectColorSlot(0)">1</button>
+                    <button class="color-slot-option" data-slot="1" onclick="selectColorSlot(1)">2</button>
+                    <button class="color-slot-option" data-slot="2" onclick="selectColorSlot(2)">3</button>
+                </div>
+            </div>
+            <p class="wled-hint">Slots 2 &amp; 3 are used by palettes like "Colors 1&amp;2" and "Color Gradient" — pick a slot, then a color.</p>
+
+            <button class="room-danger-btn" id="resumeSyncBtn" onclick="resumeAutoSync()">
+                Resume Auto Sync
+            </button>
+
+            <div class="room-list-header" style="margin-top: 24px;">
+                <span>Palette ({{ wled_palettes|length }})</span>
+            </div>
+            <div class="palette-grid" id="paletteGrid">
+                {% for p in wled_palettes %}
+                <button class="palette-chip" data-palette="{{ p.name }}"
+                    {% if p.markers %}data-markers='{{ p.markers | tojson }}'{% endif %}>
+                    <span class="palette-swatch" style="background: {{ p.gradient }};"></span>
+                    <span class="palette-name">{{ p.name }}</span>
+                </button>
+                {% endfor %}
+            </div>
+
+            <div class="room-list-header" style="margin-top: 24px;">
+                <span>Effect ({{ wled_effects|length }})</span>
+            </div>
+            <div class="effect-toolbar">
+                <input type="text" id="effectSearchInput" class="effect-search-input"
+                    placeholder="Search effects…" autocomplete="off">
+                <div class="effect-sort-pill">
+                    <button class="effect-sort-option active" data-sort="name" onclick="setEffectSort('name')">Name</button>
+                    <button class="effect-sort-option" data-sort="audio" onclick="setEffectSort('audio')">Audio</button>
+                </div>
+            </div>
+            <div class="effect-grid" id="effectGrid">
+                {% for e in wled_effects %}
+                <button class="effect-chip" data-effect="{{ e.name }}" data-audio="{{ '1' if e.audio else '0' }}">
+                    {% if e.audio %}<span class="effect-audio-badge" title="Audio reactive">♪</span>{% endif %}
+                    {{ e.name }}
+                </button>
+                {% endfor %}
+            </div>
+
+            <div class="room-list-header" style="margin-top: 24px;">
+                <span>Effect Controls</span>
+            </div>
+            <div class="effect-controls" id="effectControls">
+                <div class="effect-controls-empty" id="effectControlsEmpty">Pick an effect above to adjust it</div>
+                <div class="effect-controls-body" id="effectControlsBody" style="display: none;">
+                    <div class="ec-row" data-param-row="sx">
+                        <label>Speed</label>
+                        <input type="range" min="0" max="255" value="128" data-param="sx">
+                    </div>
+                    <div class="ec-row" data-param-row="ix">
+                        <label>Intensity</label>
+                        <input type="range" min="0" max="255" value="128" data-param="ix">
+                    </div>
+                    <div class="ec-row" data-param-row="c1">
+                        <label>Custom 1</label>
+                        <input type="range" min="0" max="255" value="128" data-param="c1">
+                    </div>
+                    <div class="ec-row" data-param-row="c2">
+                        <label>Custom 2</label>
+                        <input type="range" min="0" max="255" value="128" data-param="c2">
+                    </div>
+                    <div class="ec-row" data-param-row="c3">
+                        <label>Custom 3</label>
+                        <input type="range" min="0" max="255" value="128" data-param="c3">
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 
     <!-- Mini Player -->
@@ -254,6 +365,13 @@
                     d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.85 14,18.71V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16.02C15.5,15.29 16.5,13.77 16.5,12M3,9V15H7L12,20V4L7,9H3Z" />
             </svg>
             <span>Volume</span>
+        </a>
+        <a href="javascript:void(0)" class="nav-item" id="wledNavBtn" onclick="showWledTab()" title="WLED">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                    d="M12,2C6.5,2,2,6.5,2,12s4.5,10,10,10s10-4.5,10-10S17.5,2,12,2z M12,20c-4.4,0-8-3.6-8-8s3.6-8,8-8s8,3.6,8,8S16.4,20,12,20z M8.5,11C9.3,11,10,10.3,10,9.5S9.3,8,8.5,8S7,8.7,7,9.5S7.7,11,8.5,11z M15.5,11c0.8,0,1.5-0.7,1.5-1.5S16.3,8,15.5,8S14,8.7,14,9.5S14.7,11,15.5,11z M12,17.5c2.3,0,4.3-1.5,5-3.5H7C7.7,16,9.7,17.5,12,17.5z" />
+            </svg>
+            <span>WLED</span>
         </a>
     </nav>
 
@@ -376,7 +494,7 @@
             isMuted: {{ 'true' if isMuted else 'false' }}
         };
     </script>
-    <script src="{{ url_for('static', path='js/index.js') }}"></script>
+    <script src="{{ url_for('static', path='js/index.js') }}?v={{ asset_version }}"></script>
 
 </body>
 
